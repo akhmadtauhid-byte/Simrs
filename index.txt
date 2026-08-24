@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIMRS Allam Medica</title>
+<style>
+  :root{
+    --ink:#12242b;
+    --paper:#f4f7f6;
+    --panel:#ffffff;
+    --line:#dde5e3;
+    --teal:#0d6e6e;
+    --teal-dk:#095454;
+    --teal-lt:#e4f2f1;
+    --amber:#b5762a;
+    --amber-lt:#fbeee0;
+    --red:#b3392c;
+    --red-lt:#fbe9e6;
+    --muted:#5c7370;
+    --radius:10px;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);}
+  .app{display:flex;min-height:100vh;}
+
+  /* Sidebar */
+  .side{width:220px;background:var(--teal-dk);color:#eafaf7;flex-shrink:0;display:flex;flex-direction:column;}
+  .side .brand{padding:20px 18px 14px;border-bottom:1px solid rgba(255,255,255,.12);}
+  .side .brand b{font-size:15px;letter-spacing:.3px;display:block;}
+  .side .brand span{font-size:11px;opacity:.7;}
+  .nav{padding:10px 0;flex:1;overflow-y:auto;}
+  .nav button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;color:#cfe9e6;padding:10px 18px;font-size:13.5px;cursor:pointer;border-left:3px solid transparent;}
+  .nav button:hover{background:rgba(255,255,255,.06);}
+  .nav button.active{background:rgba(255,255,255,.1);border-left-color:#5fd0c4;color:#fff;font-weight:600;}
+  .nav .step{font-size:10px;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+  /* Main */
+  .main{flex:1;padding:22px 28px;max-width:1180px;}
+  h1{font-size:19px;margin:0 0 3px;}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 18px;}
+  .grid{display:grid;gap:14px;}
+  .grid.cols4{grid-template-columns:repeat(4,1fr);}
+  .grid.cols2{grid-template-columns:1fr 1fr;}
+  .grid.cols3{grid-template-columns:repeat(3,1fr);}
+  @media(max-width:900px){.grid.cols4,.grid.cols3,.grid.cols2{grid-template-columns:1fr;}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;}
+  .stat b{font-size:24px;display:block;}
+  .stat span{font-size:11.5px;color:var(--muted);}
+
+  label{font-size:11.5px;color:var(--muted);display:block;margin:8px 0 3px;}
+  input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;background:#fff;color:var(--ink);font-family:inherit;}
+  textarea{resize:vertical;min-height:60px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;}
+  .row > *{flex:1;min-width:150px;}
+
+  button.btn{background:var(--teal);color:#fff;border:none;padding:9px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;}
+  button.btn:hover{background:var(--teal-dk);}
+  button.btn.ghost{background:transparent;color:var(--teal);border:1px solid var(--teal);}
+  button.btn.danger{background:var(--red);}
+  button.btn.sm{padding:5px 10px;font-size:12px;}
+
+  table{width:100%;border-collapse:collapse;font-size:12.8px;}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;}
+  tr:hover td{background:var(--teal-lt);}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge.ok{background:var(--teal-lt);color:var(--teal-dk);}
+  .badge.warn{background:var(--amber-lt);color:var(--amber);}
+  .badge.danger{background:var(--red-lt);color:var(--red);}
+  .badge.muted{background:#eef1f0;color:var(--muted);}
+
+  .section-title{font-size:13.5px;font-weight:700;margin:18px 0 8px;color:var(--teal-dk);border-bottom:2px solid var(--teal-lt);padding-bottom:6px;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:11px 18px;border-radius:8px;font-size:13px;opacity:0;transform:translateY(10px);transition:.25s;pointer-events:none;z-index:99;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .patient-strip{background:var(--teal-lt);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;gap:20px;flex-wrap:wrap;}
+  .patient-strip b{color:var(--teal-dk);}
+  .empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px;}
+  .cbg-result{border:2px dashed var(--teal);border-radius:10px;padding:16px;background:var(--teal-lt);}
+  .cbg-result b.code{font-size:22px;color:var(--teal-dk);}
+  .flag-item{padding:8px 10px;border-radius:7px;font-size:12.5px;margin-bottom:6px;}
+  .flag-item.warn{background:var(--amber-lt);color:#7a4d16;}
+  .config-note{background:var(--amber-lt);border:1px solid var(--amber);color:#7a4d16;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px;}
+  .suggest-box{position:absolute;z-index:20;background:#fff;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow-y:auto;width:100%;box-shadow:0 6px 18px rgba(0,0,0,.1);display:none;}
+  .suggest-box.show{display:block;}
+  .suggest-item{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line);}
+  .suggest-item:last-child{border-bottom:none;}
+  .suggest-item:hover{background:var(--teal-lt);}
+  .suggest-item b{color:var(--teal-dk);}
+
+  /* Login screen */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,var(--teal-dk),var(--teal) 65%,#0a4a4a);}
+  .login-card{background:#fff;border-radius:14px;padding:34px 32px;width:340px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  .login-card h1{font-size:18px;margin:0 0 2px;color:var(--teal-dk);}
+  .login-card p{font-size:12px;color:var(--muted);margin:0 0 20px;}
+  .login-card button{width:100%;margin-top:14px;}
+  .login-err{color:var(--red);font-size:12.5px;margin-top:8px;min-height:16px;}
+  .user-box{padding:12px 18px;border-top:1px solid rgba(255,255,255,.12);font-size:12px;}
+  .user-box b{display:block;font-size:13px;}
+  .user-box .role-tag{display:inline-block;background:rgba(255,255,255,.15);border-radius:20px;padding:1px 8px;font-size:10px;margin-top:3px;}
+  .user-box button{background:none;border:1px solid rgba(255,255,255,.3);color:#cfe9e6;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-top:8px;}
+  .user-box button:hover{background:rgba(255,255,255,.1);}
+  @media print{
+    .side, .toast, .config-note, button.btn{display:none !important;}
+    .main{max-width:100%;padding:0;}
+    body{background:#fff;}
+  }
+  .resep-print{border:1px solid var(--line);border-radius:10px;padding:20px;background:#fff;}
+  .resep-print h2{margin:0 0 4px;font-size:16px;}
+  .resep-print .sub2{color:var(--muted);font-size:11.5px;margin-bottom:14px;}
+  .resep-print table{margin-top:8px;}
+  .resep-print .total-row td{font-weight:700;border-top:2px solid var(--ink);}
+</style>
+</head>
+<body>
+<div id="app" class="app">
+
+  <div class="side">
+    <div class="brand"><b>SIMRS Allam Medica</b><span>Pendaftaran → Pulang + INA-CBG</span></div>
+    <div class="nav" id="nav"></div>
+    <div class="user-box" id="userBox"></div>
+  </div>
+
+  <div class="main" id="main"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= KONFIGURASI ================= */
+// GANTI dengan Web App URL hasil deploy Apps Script Anda (Code.gs)
+const API_URL = "https://script.google.com/macros/s/AKfycbxARMZjrspOXSQIZdWzl5Ga13nfno8jqDR6j2s41KLVstusAI2p_AlsLpTGHFLsf8QvHg/exec";
+const DEMO_MODE = API_URL.indexOf("http") !== 0; // true selama URL belum diisi -> pakai data lokal simulasi
+
+/* ================= STATE ================= */
+let state = {
+  page: "dashboard",
+  activeKunjunganId: null,
+  local: DEMO_MODE ? seedLocalDemo() : null,
+  user: null // {nama, role} — diisi setelah login
+};
+
+const NAV = [
+  {id:"dashboard", label:"Dashboard", step:null},
+  {id:"pendaftaran", label:"1. Pendaftaran", step:"1"},
+  {id:"kunjungan", label:"2. Kunjungan Aktif", step:"2"},
+  {id:"rekammedis", label:"3. Diagnosa & Tindakan", step:"3"},
+  {id:"billing", label:"4. Billing", step:"4"},
+  {id:"inacbg", label:"5. Prediksi INA-CBG", step:"5"},
+  {id:"pulang", label:"6. Proses Pulang", step:"6"},
+  {id:"rekap", label:"Rekap Klaim", step:null},
+  {id:"aturanba", label:"📖 Aturan BA 2024", step:null},
+];
+
+// Peta akses per role. "admin" selalu dapat semua menu.
+const ROLE_ACCESS = {
+  admin: NAV.map(n=>n.id),
+  pendaftaran: ["dashboard","pendaftaran","kunjungan"],
+  rekammedis: ["dashboard","kunjungan","rekammedis","aturanba"],
+  perawat: ["dashboard","kunjungan","rekammedis","aturanba"],
+  kasir: ["dashboard","kunjungan","billing"],
+  verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba"],
+};
+function navAllowed(){
+  if(!state.user) return [];
+  const role = (state.user.role||"admin").toLowerCase();
+  return ROLE_ACCESS[role] || ROLE_ACCESS.admin;
+}
+
+function renderNav(){
+  const nav = document.getElementById("nav");
+  const allowed = navAllowed();
+  nav.innerHTML = NAV.filter(n=>allowed.includes(n.id)).map(n => `
+    <button class="${state.page===n.id?'active':''}" onclick="goTo('${n.id}')">
+      ${n.step ? `<span class="step">${n.step}</span>` : `<span class="step">•</span>`} ${n.label}
+    </button>`).join("");
+  const ub = document.getElementById("userBox");
+  if(ub && state.user){
+    ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br><button onclick="logout()">Keluar</button>`;
+  }
+}
+function goTo(page){
+  if(!navAllowed().includes(page)){ toast("Menu ini tidak tersedia untuk role Anda"); return; }
+  state.page = page; render();
+}
+function logout(){ state.user = null; render(); }
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2600);
+}
+
+/* ================= LOGIN ================= */
+async function renderLogin(){
+  document.getElementById("app").innerHTML = `
+    <div class="login-wrap"><div class="login-card">
+      <h1>SIMRS Allam Medica</h1>
+      <p>${DEMO_MODE ? "Mode demo — pakai admin / admin123" : "Masuk untuk melanjutkan"}</p>
+      <label>Username</label><input id="loginUser" placeholder="admin" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+      <label>Password</label><input id="loginPass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="btn" onclick="doLogin()">Masuk</button>
+      <div class="login-err" id="loginErr"></div>
+    </div></div>`;
+}
+async function doLogin(){
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value.trim();
+  const r = await api("login", {username, password}, "POST");
+  if(r.ok){
+    state.user = {nama:r.nama, role:r.role};
+    rebuildAppShell();
+    render();
+  } else {
+    document.getElementById("loginErr").textContent = r.msg || "Login gagal";
+  }
+}
+function rebuildAppShell(){
+  document.getElementById("app").outerHTML = `<div id="app" class="app">
+    <div class="side">
+      <div class="brand"><b>SIMRS Allam Medica</b><span>Pendaftaran → Pulang + INA-CBG</span></div>
+      <div class="nav" id="nav"></div>
+      <div class="user-box" id="userBox"></div>
+    </div>
+    <div class="main" id="main"></div>
+  </div>`;
+}
+
+
+async function api(action, data, method){
+  if (DEMO_MODE) return localApi(action, data);
+  try{
+    if (method === "GET"){
+      const qs = new URLSearchParams({action, ...data}).toString();
+      const res = await fetch(`${API_URL}?${qs}`);
+      return await res.json();
+    } else {
+      const res = await fetch(API_URL, {method:"POST", body: JSON.stringify({action, data})});
+      return await res.json();
+    }
+  }catch(err){
+    toast("Gagal hubungi server: " + err.message);
+    return {ok:false, msg: err.message};
+  }
+}
+
+/* ============ MODE DEMO (simulasi lokal, tanpa backend) ============ */
+function seedLocalDemo(){
+  return {
+    pasien: [],
+    kunjungan: [],
+    rawatInap: [],
+    diagnosa: [],
+    tindakan: [],
+    billing: [],
+    klaim: [],
+    tarif: [
+      {KodeCBG:"A-4-14-I", Deskripsi:"Prosedur Sistem Saraf Lain Ringan", JenisRIRJ:"RI", TarifKelas1:3200000, TarifKelas2:2800000, TarifKelas3:2400000, TarifRJ:0},
+      {KodeCBG:"I-4-10-II", Deskripsi:"Gangguan Kardiovaskular Sedang", JenisRIRJ:"RI", TarifKelas1:6500000, TarifKelas2:5600000, TarifKelas3:4800000, TarifRJ:0},
+      {KodeCBG:"J-4-18-II", Deskripsi:"Infeksi Saluran Kemih Sedang", JenisRIRJ:"RI", TarifKelas1:4100000, TarifKelas2:3500000, TarifKelas3:3000000, TarifRJ:0},
+      {KodeCBG:"K-4-17-I", Deskripsi:"Gangguan Saluran Cerna Ringan", JenisRIRJ:"RI", TarifKelas1:3600000, TarifKelas2:3100000, TarifKelas3:2650000, TarifRJ:0},
+      {KodeCBG:"Q-5-45-0", Deskripsi:"Rawat Jalan Prosedur Kecil", JenisRIRJ:"RJ", TarifKelas1:0, TarifKelas2:0, TarifKelas3:0, TarifRJ:350000},
+      {KodeCBG:"Z-1-30-0", Deskripsi:"Konsultasi Spesialis Rawat Jalan", JenisRIRJ:"RJ", TarifKelas1:0, TarifKelas2:0, TarifKelas3:0, TarifRJ:180000},
+    ],
+    diagCbgMap: [
+      {ICD10Utama:"I50.0", KodeCBG:"I-4-12-III", JenisRIRJ:"RI", BiayaPengajuanContoh:4884300},
+      {ICD10Utama:"A49.9", KodeCBG:"A-4-14-I", JenisRIRJ:"RI", BiayaPengajuanContoh:2385994},
+      {ICD10Utama:"Z09.8", KodeCBG:"Q-5-44-0", JenisRIRJ:"RJ", BiayaPengajuanContoh:196100},
+    ],
+    aturanBA2024: [
+      {No:1, Ranah:"Administrasi", Kasus:"Rehabilitasi Medis", Ketentuan:"Pelayanan rehab medis oleh terapis dgn pemantauan Dokter Sp.KFR. Wajib lampirkan protokol terapi & reassessment tiap 2 minggu, bukti periksa sebelum/sesudah, bukti pendampingan Sp.KFR.", KataKunci:"rehabilitasi,fisioterapi,sp.kfr"},
+      {No:2, Ranah:"Administrasi", Kasus:"Konsul Internal & Rujukan Internal RJTL", Ketentuan:"Konsul internal (dikembalikan ke perujuk) = 1 episode klaim. Rujukan internal (tidak dikembalikan) = boleh 2 episode jika beda hari.", KataKunci:"konsul internal,rujukan internal"},
+      {No:3, Ranah:"Administrasi", Kasus:"Obat Kronis dengan Diagnosa PRB", Ketentuan:"Obat kronis sama 3 bulan berturut-turut otomatis masuk PRB. Tetap boleh ke FKRTL saat gawat darurat/di luar diagnosis PRB.", KataKunci:"obat kronis,prb,rujuk balik"},
+      {No:4, Ranah:"Administrasi", Kasus:"Pelayanan Iterasi Obat", Ketentuan:"Iterasi maksimal 2x tanpa tatap muka dokter spesialis. Bulan ke-2 & ke-3 langsung ke farmasi.", KataKunci:"iterasi obat,resep ulang"},
+      {No:5, Ranah:"Medis", Kasus:"Soft Tissue Tumor", Ketentuan:"Rawat inap hanya jika: deep tumor, atau >4cm meluas ke struktur vital, atau STT dengan keganasan. Di luar itu wajib rawat jalan. Dokumen wajib: PA + laporan operasi.", KataKunci:"soft tissue tumor,tumor,eksisi"},
+      {No:6, Ranah:"Medis", Kasus:"IGD Rawat Inap - Penjaminan", Ketentuan:"False emergency tidak dijamin. RITL dijamin jika: kriteria gawat darurat, tuntas tidak dirujuk, >6 jam, indikasi & administrasi RI terpenuhi, menempati ruang rawat, ada visitasi DPJP.", KataKunci:"igd,gawat darurat,emergency"},
+      {No:7, Ranah:"Medis", Kasus:"Odontektomi", Ketentuan:"Kriteria RJ/RI mengacu HANYA pada Kepmenkes 777/2022 (PNPK Impaksi Gigi) & Permenkes 3/2023.", KataKunci:"odontektomi,impaksi gigi,cabut gigi"},
+    ]
+  };
+}
+function genId(p){ return p+"-"+Date.now().toString().slice(-8)+Math.floor(Math.random()*90+10); }
+
+function localApi(action, d){
+  const L = state.local;
+  switch(action){
+    case "login": {
+      const users = [
+        {u:"admin", p:"admin123", nama:"Administrator", role:"admin"},
+        {u:"pendaftaran", p:"1234", nama:"Petugas Pendaftaran", role:"pendaftaran"},
+        {u:"perawat", p:"1234", nama:"Perawat/Rekam Medis", role:"rekammedis"},
+        {u:"kasir", p:"1234", nama:"Kasir", role:"kasir"},
+        {u:"verifikator", p:"1234", nama:"Verifikator Klaim", role:"verifikator"},
+      ];
+      const found = users.find(x=>x.u===d.username && x.p===d.password);
+      if(!found) return {ok:false, msg:"Username / password salah (mode demo: admin/admin123, atau pendaftaran, perawat, kasir, verifikator — semua password 1234)"};
+      return {ok:true, nama:found.nama, role:found.role};
+    }
+    case "daftarPasienBaru": {
+      const rm = "RM"+String(L.pasien.length+1).padStart(5,"0");
+      const pasien = {RM:rm, ...d, TglDaftar:new Date().toISOString()};
+      L.pasien.push(pasien);
+      return {ok:true, rm, data:pasien};
+    }
+    case "buatKunjungan": {
+      const id = genId("KJ");
+      const k = {KunjunganID:id, TglKunjungan:new Date().toISOString(), Status:"Aktif", ...d};
+      L.kunjungan.push(k);
+      return {ok:true, kunjunganId:id, data:k};
+    }
+    case "getKunjunganAktif": return L.kunjungan.filter(k=>k.Status==="Aktif");
+    case "getKunjunganDetail": {
+      const k = L.kunjungan.find(x=>x.KunjunganID===d.id);
+      if(!k) return {ok:false, msg:"Tidak ditemukan"};
+      const pasien = L.pasien.find(p=>p.RM===k.rm || p.RM===k.RM);
+      return {ok:true, kunjungan:k, pasien,
+        rawatInap: L.rawatInap.find(r=>r.KunjunganID===d.id),
+        diagnosa: L.diagnosa.filter(x=>x.KunjunganID===d.id),
+        tindakan: L.tindakan.filter(x=>x.KunjunganID===d.id),
+        billing: L.billing.filter(x=>x.KunjunganID===d.id),
+        klaim: L.klaim.find(x=>x.KunjunganID===d.id)};
+    }
+    case "admisiRawatInap": {
+      const ri = {RawatInapID:genId("RI"), TglMasuk:new Date().toISOString(), Status:"Dirawat", ...d};
+      L.rawatInap.push(ri);
+      const k = L.kunjungan.find(x=>x.KunjunganID===d.kunjunganId); if(k) k.JenisKunjungan="Rawat Inap";
+      return {ok:true, data:ri};
+    }
+    case "tambahDiagnosa": {
+      const item = {DiagnosaID:genId("DX"), ...d}; L.diagnosa.push(item); return {ok:true, data:item};
+    }
+    case "tambahTindakan": {
+      const item = {TindakanID:genId("TX"), ...d}; L.tindakan.push(item); return {ok:true, data:item};
+    }
+    case "tambahBilling": {
+      const total = Number(d.qty)*Number(d.tarifSatuan);
+      const item = {BillingID:genId("BL"), ...d, Total:total}; L.billing.push(item); return {ok:true, data:item};
+    }
+    case "prediksiINACBG": {
+      const detail = localApi("getKunjunganDetail", {id:d.kunjunganId});
+      const diagnosaUtama = detail.diagnosa.find(x=>x.jenis==="Utama"||x.JenisDiagnosa==="Utama");
+      const diagnosaSekunder = detail.diagnosa.filter(x=>(x.jenis||x.JenisDiagnosa)==="Sekunder");
+      const jenisRIRJ = detail.kunjungan.jenisKunjungan==="Rawat Inap"||detail.kunjungan.JenisKunjungan==="Rawat Inap" ? "RI":"RJ";
+      const kelasRawat = detail.rawatInap ? detail.rawatInap.kelas||detail.rawatInap.Kelas : "3";
+      let severity = "I";
+      if(diagnosaSekunder.length>=3) severity="III"; else if(diagnosaSekunder.length>=1) severity="II";
+      let match=null, sumberMatch="";
+      if(diagnosaUtama){
+        const kode = String(diagnosaUtama.kodeICD10||diagnosaUtama.KodeICD10||"").trim().toUpperCase();
+        const found = L.diagCbgMap.filter(m=>m.ICD10Utama.toUpperCase()===kode && m.JenisRIRJ===jenisRIRJ);
+        if(found.length){
+          const tarifRef = L.tarif.find(t=>t.KodeCBG===found[0].KodeCBG);
+          match = {KodeCBG:found[0].KodeCBG, Deskripsi: tarifRef?tarifRef.Deskripsi:"(dari histori klaim riil, deskripsi belum ada di tabel tarif)",
+            TarifKelas1:tarifRef?tarifRef.TarifKelas1:0, TarifKelas2:tarifRef?tarifRef.TarifKelas2:0, TarifKelas3:tarifRef?tarifRef.TarifKelas3:0, TarifRJ:tarifRef?tarifRef.TarifRJ:0,
+            _rata: Math.round(found.reduce((s,m)=>s+Number(m.BiayaPengajuanContoh||0),0)/found.length), _n: found.length};
+          sumberMatch="riwayat_klaim_riil";
+        }
+      }
+      if(!match && diagnosaUtama){
+        const kw=(diagnosaUtama.deskripsi||diagnosaUtama.Deskripsi||"").toLowerCase().split(" ")[0];
+        match = L.tarif.find(t=>t.JenisRIRJ===jenisRIRJ && t.Deskripsi.toLowerCase().includes(kw));
+      }
+      if(!match) match = L.tarif.find(t=>t.JenisRIRJ===jenisRIRJ);
+      let tarifPrediksi=0, kodeCBG="-", deskripsiCBG="Tidak ditemukan kecocokan";
+      if(match){ kodeCBG=match.KodeCBG; deskripsiCBG=match.Deskripsi;
+        tarifPrediksi = jenisRIRJ==="RJ" ? Number(match.TarifRJ||0) : Number(match["TarifKelas"+kelasRawat]||0);
+        if(!tarifPrediksi && match._rata) tarifPrediksi = match._rata;
+      }
+      const totalBillingRS = detail.billing.reduce((s,r)=>s+Number(r.Total||0),0);
+      const selisih = totalBillingRS - tarifPrediksi;
+      let catatan=[];
+      if(!match) catatan.push("Kode CBG tidak ditemukan otomatis — lengkapi tabel tarif referensi.");
+      if(sumberMatch==="riwayat_klaim_riil") catatan.push("Prediksi berdasarkan "+match._n+" histori klaim riil (rata-rata pengajuan Rp"+Number(match._rata).toLocaleString('id-ID')+") — sumbernya kasus yang sempat pending/dispute, tetap cek ulang.");
+      if(tarifPrediksi>0 && totalBillingRS>tarifPrediksi*1.15) catatan.push("PERINGATAN: billing RS melebihi prediksi tarif >15%.");
+      if(diagnosaSekunder.length===0) catatan.push("Belum ada diagnosa sekunder — cek kemungkinan CC/MCC yang belum tercatat.");
+      const teks = ((diagnosaUtama?(diagnosaUtama.deskripsi||diagnosaUtama.Deskripsi):"")+" "+
+        detail.diagnosa.map(x=>x.deskripsi||x.Deskripsi).join(" ")+" "+
+        detail.tindakan.map(x=>x.deskripsi||x.Deskripsi).join(" ")+" "+
+        (detail.kunjungan.keluhanUtama||detail.kunjungan.KeluhanUtama||"")).toLowerCase();
+      L.aturanBA2024.filter(a=>a.KataKunci.split(",").some(kw=>teks.includes(kw.trim()))).forEach(a=>{
+        catatan.push("BA 3760/2024 ("+a.Ranah+" #"+a.No+" - "+a.Kasus+"): "+a.Ketentuan);
+      });
+      const klaim = {KlaimID:genId("KL"), KunjunganID:d.kunjunganId, KodeCBGPrediksi:kodeCBG, DeskripsiCBG:deskripsiCBG,
+        Severity:severity, KelasRawat:kelasRawat, TarifPrediksi:tarifPrediksi, TotalBillingRS:totalBillingRS,
+        Selisih:selisih, StatusKlaim:"Draft Prediksi", Catatan:catatan.join(" | "), TglPrediksi:new Date().toISOString()};
+      L.klaim = L.klaim.filter(x=>x.KunjunganID!==d.kunjunganId);
+      L.klaim.push(klaim);
+      return {ok:true, data:klaim};
+    }
+    case "prosesPulang": {
+      const ri = L.rawatInap.find(r=>r.KunjunganID===d.kunjunganId);
+      if(ri){ const masuk=new Date(ri.TglMasuk); const los=Math.max(1, Math.round((Date.now()-masuk)/86400000));
+        ri.TglKeluar=new Date().toISOString(); ri.CaraKeluar=d.caraKeluar||"Pulang Normal"; ri.LOS=los; ri.Status="Pulang"; }
+      const k = L.kunjungan.find(x=>x.KunjunganID===d.kunjunganId); if(k) k.Status="Selesai";
+      const prediksi = localApi("prediksiINACBG", {kunjunganId:d.kunjunganId});
+      return {ok:true, msg:"Pasien diproses pulang", prediksiINACBG:prediksi.data};
+    }
+    case "getRekapKlaim": return L.klaim;
+    case "getTarifList": return L.tarif;
+    case "getAturanBA2024": return L.aturanBA2024;
+    case "getDiagnosaCBGMap": return L.diagCbgMap;
+    case "getDashboard": {
+      const hariIni = L.kunjungan.filter(k=>new Date(k.TglKunjungan).toDateString()===new Date().toDateString());
+      return {ok:true, kunjunganHariIni:hariIni.length, kunjunganAktif:L.kunjungan.filter(k=>k.Status==="Aktif").length,
+        pasienDirawat:L.rawatInap.filter(r=>r.Status==="Dirawat").length, totalPasienTerdaftar:L.pasien.length,
+        klaimBerpotensiRugi:L.klaim.filter(k=>k.Selisih<0).length, totalKlaimDiprediksi:L.klaim.length};
+    }
+  }
+  return {ok:false, msg:"action tidak dikenal (demo): "+action};
+}
+
+/* ================= RENDER: PAGES ================= */
+function render(){
+  if(!state.user){ renderLogin(); return; }
+  if(!navAllowed().includes(state.page)) state.page = navAllowed()[0] || "dashboard";
+  renderNav();
+  const m = document.getElementById("main");
+  const pages = {
+    dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,
+    rekammedis: pageRekamMedis, billing: pageBilling, inacbg: pageInaCbg,
+    pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA
+  };
+  m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
+  const holder = document.createElement("div"); m.appendChild(holder);
+  pages[state.page](holder);
+}
+
+async function pageDashboard(el){
+  el.innerHTML = `<h1>Dashboard</h1><p class="sub">Ringkasan operasional hari ini</p><div class="grid cols4" id="stats"></div>`;
+  const r = await api("getDashboard", {}, "GET");
+  document.getElementById("stats").innerHTML = `
+    <div class="card stat"><b>${r.kunjunganHariIni??0}</b><span>Kunjungan Hari Ini</span></div>
+    <div class="card stat"><b>${r.kunjunganAktif??0}</b><span>Kunjungan Aktif</span></div>
+    <div class="card stat"><b>${r.pasienDirawat??0}</b><span>Pasien Dirawat (Ranap)</span></div>
+    <div class="card stat"><b>${r.totalPasienTerdaftar??0}</b><span>Total Pasien Terdaftar</span></div>
+    <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.klaimBerpotensiRugi??0}</b><span>Klaim Berpotensi Rugi (billing &gt; prediksi CBG)</span></div>
+    <div class="card stat"><b>${r.totalKlaimDiprediksi??0}</b><span>Total Klaim Diprediksi</span></div>
+  `;
+}
+
+function pagePendaftaran(el){
+  el.innerHTML = `
+    <h1>Pendaftaran Pasien</h1><p class="sub">Langkah 1 — daftar pasien baru / cari pasien lama, lalu buat kunjungan</p>
+    <div class="grid cols2">
+      <div class="card">
+        <div class="section-title">Pasien Baru</div>
+        <div class="row"><div><label>Nama Lengkap</label><input id="nama"></div><div><label>NIK</label><input id="nik"></div></div>
+        <div class="row"><div><label>Tanggal Lahir</label><input type="date" id="tglLahir"></div>
+          <div><label>Jenis Kelamin</label><select id="jk"><option>Laki-laki</option><option>Perempuan</option></select></div></div>
+        <label>Alamat</label><textarea id="alamat"></textarea>
+        <div class="row"><div><label>No. HP</label><input id="noHP"></div>
+          <div><label>Penjamin</label><select id="penjamin"><option>BPJS</option><option>Umum</option><option>Asuransi Lain</option></select></div></div>
+        <label>No. Kartu BPJS (jika ada)</label><input id="noKartuBPJS">
+        <div style="margin-top:12px"><button class="btn" onclick="submitPasienBaru()">Daftarkan Pasien</button></div>
+        <div class="hint" id="hasilDaftar"></div>
+      </div>
+      <div class="card">
+        <div class="section-title">Buat Kunjungan</div>
+        <label>Cari Pasien (No. RM / Nama)</label>
+        <input id="cariRM" placeholder="Ketik No. RM setelah pasien terdaftar...">
+        <div class="row"><div><label>Jenis Kunjungan</label><select id="jenisKunjungan"><option>Rawat Jalan</option><option>Rawat Inap</option><option>IGD</option></select></div>
+          <div><label>Poli / Ruangan Tujuan</label><input id="poliRuangan" placeholder="cth: Poli Penyakit Dalam"></div></div>
+        <div class="row"><div><label>DPJP</label><input id="dpjp" placeholder="dr. ..."></div>
+          <div><label>Petugas Pendaftaran</label><input id="petugas"></div></div>
+        <label>Keluhan Utama</label><textarea id="keluhanUtama"></textarea>
+        <div style="margin-top:12px"><button class="btn" onclick="submitKunjungan()">Buat Kunjungan</button></div>
+        <div class="hint" id="hasilKunjungan"></div>
+      </div>
+    </div>`;
+}
+let lastRM = null;
+async function submitPasienBaru(){
+  const data = {nama:val("nama"), nik:val("nik"), tglLahir:val("tglLahir"), jk:val("jk"),
+    alamat:val("alamat"), noHP:val("noHP"), penjamin:val("penjamin"), noKartuBPJS:val("noKartuBPJS")};
+  if(!data.nama){ toast("Nama wajib diisi"); return; }
+  const r = await api("daftarPasienBaru", data, "POST");
+  if(r.ok){ lastRM=r.rm; document.getElementById("hasilDaftar").innerHTML = `✅ Terdaftar dengan No. RM: <b>${r.rm}</b>`;
+    document.getElementById("cariRM").value = r.rm; toast("Pasien baru terdaftar: "+r.rm); }
+}
+async function submitKunjungan(){
+  const rm = val("cariRM") || lastRM;
+  if(!rm){ toast("Isi/cari No. RM dulu"); return; }
+  const data = {rm, RM:rm, jenisKunjungan:val("jenisKunjungan"), JenisKunjungan:val("jenisKunjungan"),
+    poliRuangan:val("poliRuangan"), dpjp:val("dpjp"), keluhanUtama:val("keluhanUtama"), petugas:val("petugas")};
+  const r = await api("buatKunjungan", data, "POST");
+  if(r.ok){ document.getElementById("hasilKunjungan").innerHTML = `✅ Kunjungan dibuat: <b>${r.kunjunganId}</b>`;
+    state.activeKunjunganId = r.kunjunganId; toast("Kunjungan dibuat, lanjut ke tahap berikutnya"); }
+}
+function val(id){ return document.getElementById(id).value.trim(); }
+
+/* ============ Pencarian kode ICD-10 / ICD-9-CM ============ */
+let searchDebounce;
+function cariKode(inputId, boxId, searchFn){
+  clearTimeout(searchDebounce);
+  const q = val(inputId);
+  const box = document.getElementById(boxId);
+  if(q.length < 2){ box.classList.remove("show"); box.innerHTML=""; return; }
+  searchDebounce = setTimeout(async ()=>{
+    const results = await searchFn(q);
+    if(!results.length){ box.innerHTML = `<div class="suggest-item" style="color:var(--muted)">Tidak ada hasil</div>`; box.classList.add("show"); return; }
+    box.innerHTML = results.map(r=>`<div class="suggest-item" onclick='pilihKode(${JSON.stringify(inputId)}, ${JSON.stringify(boxId)}, ${JSON.stringify(r.Kode||r.kode)}, ${JSON.stringify((r.Deskripsi||r.deskripsi||"").replace(/'/g,"&#39;"))})'><b>${r.Kode||r.kode}</b> — ${r.Deskripsi||r.deskripsi}</div>`).join("");
+    box.classList.add("show");
+  }, 250);
+}
+function pilihKode(inputId, boxId, kode, desk){
+  document.getElementById(boxId).classList.remove("show");
+  document.getElementById(inputId).value = kode + " — " + desk;
+  if(inputId==="cariICD10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; }
+  if(inputId==="cariICD9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; }
+}
+// Fallback offline ringkas untuk mode demo (database lengkap 7.433/3.979 kode ada di backend Apps Script)
+const ICD10_DEMO_FALLBACK = [
+  {Kode:"A09", Deskripsi:"Diarrhoea and gastro-enteritis of presumed infectious origin"},
+  {Kode:"A49.9", Deskripsi:"Bacterial infection, unspecified"},
+  {Kode:"I50.0", Deskripsi:"Congestive heart failure"},
+  {Kode:"I11.9", Deskripsi:"Hypertensive heart disease without (congestive) heart failure"},
+  {Kode:"J18.9", Deskripsi:"Pneumonia, unspecified"},
+  {Kode:"Z09.8", Deskripsi:"Follow-up examination after other treatment for other conditions"},
+];
+const ICD9_DEMO_FALLBACK = [
+  {Kode:"99.29", Deskripsi:"Injection or infusion of other therapeutic or prophylactic substance"},
+  {Kode:"93.57", Deskripsi:"Application of other wound dressing"},
+  {Kode:"88.72", Deskripsi:"Diagnostic ultrasound of heart"},
+  {Kode:"45.13", Deskripsi:"Other endoscopy of small intestine"},
+];
+async function searchICD10API(q){
+  if(DEMO_MODE){ q=q.toLowerCase(); return ICD10_DEMO_FALLBACK.filter(r=>r.Kode.toLowerCase().includes(q)||r.Deskripsi.toLowerCase().includes(q)); }
+  return await api("searchICD10", {q}, "GET");
+}
+async function searchICD9API(q){
+  if(DEMO_MODE){ q=q.toLowerCase(); return ICD9_DEMO_FALLBACK.filter(r=>r.Kode.toLowerCase().includes(q)||r.Deskripsi.toLowerCase().includes(q)); }
+  return await api("searchICD9", {q}, "GET");
+}
+
+async function pageKunjungan(el){
+  el.innerHTML = `<h1>Kunjungan Aktif</h1><p class="sub">Langkah 2 — pilih kunjungan untuk lanjut ke rekam medis / rawat inap</p><div id="list"></div>`;
+  const rows = await api("getKunjunganAktif", {}, "GET");
+  if(!rows.length){ document.getElementById("list").innerHTML = `<div class="card empty">Belum ada kunjungan aktif. Buat di menu Pendaftaran.</div>`; return; }
+  document.getElementById("list").innerHTML = `<div class="card"><table>
+    <tr><th>ID</th><th>RM</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th></th></tr>
+    ${rows.map(k=>`<tr>
+      <td>${k.KunjunganID}</td><td>${k.rm||k.RM}</td><td>${k.jenisKunjungan||k.JenisKunjungan}</td>
+      <td>${k.poliRuangan||k.PoliRuangan||"-"}</td><td>${k.dpjp||k.DPJP||"-"}</td>
+      <td><span class="badge ok">${k.Status}</span></td>
+      <td><button class="btn sm" onclick="pilihKunjungan('${k.KunjunganID}')">Pilih →</button></td>
+    </tr>`).join("")}
+  </table></div>`;
+}
+function pilihKunjungan(id){ state.activeKunjunganId = id; goTo("rekammedis"); }
+
+async function patientStrip(kunjunganId){
+  if(!kunjunganId) return `<div class="card empty">Belum ada kunjungan dipilih. Ke menu <b>Kunjungan Aktif</b> dulu untuk memilih pasien.</div>`;
+  const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
+  if(!d.ok) return `<div class="card empty">Kunjungan tidak ditemukan.</div>`;
+  window.__detail = d;
+  const p = d.pasien||{};
+  return `<div class="patient-strip">
+    <div><b>${p.nama||p.Nama||"-"}</b> · RM ${p.RM||"-"}</div>
+    <div>${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}</div>
+    <div>DPJP: ${d.kunjungan.dpjp||d.kunjungan.DPJP||"-"}</div>
+    <div>Kunjungan: ${kunjunganId}</div>
+  </div>`;
+}
+
+async function pageRekamMedis(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Diagnosa & Tindakan</h1><p class="sub">Langkah 3 — input ICD-10 (diagnosa) & ICD-9-CM (tindakan). Untuk Rawat Inap, lengkapi admisi ruangan dulu.</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  const d = window.__detail;
+  const isRI = (d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan) !== "Rawat Jalan";
+
+  el.innerHTML += `<div class="grid cols2">
+    ${isRI ? `<div class="card">
+      <div class="section-title">Admisi Rawat Inap</div>
+      ${d.rawatInap ? `<div class="hint">Sudah diadmisi: Ruangan ${d.rawatInap.ruangan||d.rawatInap.Ruangan}, Kelas ${d.rawatInap.kelas||d.rawatInap.Kelas}</div>` : `
+      <div class="row"><div><label>Ruangan</label><input id="ruangan" placeholder="cth: Melati 2"></div>
+        <div><label>Kelas Rawat</label><select id="kelas"><option value="1">Kelas 1</option><option value="2">Kelas 2</option><option value="3">Kelas 3</option></select></div></div>
+      <div class="row"><div><label>DPJP</label><input id="dpjpRI"></div><div><label>Cara Masuk</label><select id="caraMasuk"><option>Rujukan</option><option>IGD</option><option>Poliklinik</option></select></div></div>
+      <button class="btn" style="margin-top:10px" onclick="submitAdmisi()">Admisi Pasien</button>`}
+    </div>` : ""}
+    <div class="card">
+      <div class="section-title">Tambah Diagnosa (ICD-10)</div>
+      <div class="row"><div><label>Jenis</label><select id="jenisDiag"><option>Utama</option><option>Sekunder</option></select></div>
+        <div style="position:relative;"><label>Cari Kode / Deskripsi ICD-10</label>
+          <input id="cariICD10" placeholder="ketik kode (A09) atau nama diagnosa..." oninput="cariKode('cariICD10','saranICD10',searchICD10API)">
+          <div id="saranICD10" class="suggest-box"></div>
+        </div></div>
+      <div class="row"><div><label>Kode ICD-10 (terpilih)</label><input id="kodeICD10" placeholder="cth: A09"></div>
+        <div><label>Deskripsi Diagnosa</label><input id="deskDiag" placeholder="cth: Gastroenteritis akut"></div></div>
+      <button class="btn" style="margin-top:10px" onclick="submitDiagnosa()">Tambah Diagnosa</button>
+    </div>
+    <div class="card">
+      <div class="section-title">Tambah Tindakan (ICD-9-CM)</div>
+      <div style="position:relative;"><label>Cari Kode / Deskripsi ICD-9-CM</label>
+        <input id="cariICD9" placeholder="ketik kode (99.29) atau nama tindakan..." oninput="cariKode('cariICD9','saranICD9',searchICD9API)">
+        <div id="saranICD9" class="suggest-box"></div>
+      </div>
+      <div class="row"><div><label>Kode ICD-9-CM (terpilih)</label><input id="kodeICD9" placeholder="cth: 99.29"></div>
+        <div><label>Pelaksana</label><input id="pelaksana"></div></div>
+      <label>Deskripsi Tindakan</label><input id="deskTindakan" placeholder="cth: Injeksi terapeutik">
+      <button class="btn" style="margin-top:10px" onclick="submitTindakan()">Tambah Tindakan</button>
+    </div>
+  </div>
+  <p class="hint">💡 Ketik minimal 2 huruf di kotak pencarian untuk melihat saran kode dari database resmi ICD-10 / ICD-9-CM (7.433 & 3.979 kode). Klik saran untuk mengisi otomatis kode + deskripsi.</p>
+  <div class="grid" style="display:none"></div>
+  <div class="section-title">Diagnosa Tercatat</div>
+  <div class="card">${d.diagnosa.length ? `<table><tr><th>Jenis</th><th>Kode</th><th>Deskripsi</th></tr>
+    ${d.diagnosa.map(x=>`<tr><td><span class="badge ${x.jenis===('Utama')||x.JenisDiagnosa==='Utama'?'ok':'muted'}">${x.jenis||x.JenisDiagnosa}</span></td><td>${x.kodeICD10||x.KodeICD10}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")}
+  </table>` : `<div class="empty">Belum ada diagnosa</div>`}</div>
+  <div class="section-title">Tindakan Tercatat</div>
+  <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th></tr>
+    ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td></tr>`).join("")}
+  </table>` : `<div class="empty">Belum ada tindakan</div>`}</div>`;
+}
+async function submitAdmisi(){
+  const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjp:val("dpjpRI"), caraMasuk:val("caraMasuk")}, "POST");
+  if(r.ok){ toast("Pasien diadmisi rawat inap"); render(); }
+}
+async function submitDiagnosa(){
+  const r = await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
+  if(r.ok){ toast("Diagnosa ditambahkan"); render(); }
+}
+async function submitTindakan(){
+  const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksana:val("pelaksana")}, "POST");
+  if(r.ok){ toast("Tindakan ditambahkan"); render(); }
+}
+
+async function pageBilling(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Billing</h1><p class="sub">Langkah 4 — catat semua biaya riil (jasa sarana, jasa pelayanan, obat, BHP, dsb) untuk dibandingkan dengan prediksi tarif INA-CBG</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  const d = window.__detail;
+  const total = d.billing.reduce((s,r)=>s+Number(r.Total||0),0);
+  el.innerHTML += `<div class="card">
+    <div class="section-title">Tambah Item Billing</div>
+    <div class="row"><div><label>Kategori</label><select id="kategori">
+      <option>Jasa Sarana</option><option>Jasa Pelayanan</option><option>Obat</option><option>BHP</option><option>Laboratorium</option><option>Radiologi</option><option>Kamar</option><option>Lainnya</option>
+    </select></div><div><label>Deskripsi</label><input id="deskBilling"></div></div>
+    <div class="row"><div><label>Qty</label><input type="number" id="qty" value="1"></div>
+      <div><label>Tarif Satuan (Rp)</label><input type="number" id="tarifSatuan" value="0"></div></div>
+    <button class="btn" style="margin-top:10px" onclick="submitBilling()">Tambah</button>
+  </div>
+  <div class="section-title">Rincian Billing</div>
+  <div class="card">${d.billing.length ? `<table><tr><th>Kategori</th><th>Deskripsi</th><th>Qty</th><th>Tarif Satuan</th><th>Total</th></tr>
+    ${d.billing.map(x=>`<tr><td>${x.kategori||x.Kategori}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.qty||x.Qty}</td><td>Rp${Number(x.tarifSatuan||x.TarifSatuan).toLocaleString('id-ID')}</td><td>Rp${Number(x.Total).toLocaleString('id-ID')}</td></tr>`).join("")}
+  </table>` : `<div class="empty">Belum ada billing</div>`}
+  <div style="text-align:right;margin-top:10px;font-size:16px;font-weight:700;color:var(--teal-dk)">Total: Rp${total.toLocaleString('id-ID')}</div>
+  </div>`;
+}
+async function submitBilling(){
+  const r = await api("tambahBilling", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kategori:val("kategori"), Kategori:val("kategori"), deskripsi:val("deskBilling"), Deskripsi:val("deskBilling"), qty:val("qty"), Qty:val("qty"), tarifSatuan:val("tarifSatuan"), TarifSatuan:val("tarifSatuan")}, "POST");
+  if(r.ok){ toast("Item billing ditambahkan"); render(); }
+}
+
+async function pageInaCbg(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Prediksi INA-CBG</h1><p class="sub">Langkah 5 — estimasi kode & tarif CBG berdasarkan diagnosa, tindakan, kelas rawat, dibandingkan dengan billing riil</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  el.innerHTML += `<div class="card"><button class="btn" onclick="jalankanPrediksi()">🔮 Jalankan Prediksi INA-CBG</button></div><div id="hasilCbg" style="margin-top:14px"></div>`;
+  const d = window.__detail;
+  if(d.klaim) renderHasilCbg(d.klaim);
+}
+async function jalankanPrediksi(){
+  const r = await api("prediksiINACBG", {kunjunganId:state.activeKunjunganId}, "POST");
+  if(r.ok){ renderHasilCbg(r.data); toast("Prediksi selesai"); }
+}
+function renderHasilCbg(k){
+  const selisih = Number(k.Selisih||k.selisih||0);
+  const flagWarn = k.Catatan && k.Catatan.split(" | ").filter(Boolean);
+  document.getElementById("hasilCbg").innerHTML = `
+    <div class="cbg-result">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;">
+        <div><span class="hint">KODE CBG PREDIKSI</span><br><b class="code">${k.KodeCBGPrediksi}</b><div>${k.DeskripsiCBG}</div></div>
+        <div><span class="hint">SEVERITY</span><br><b class="code">${k.Severity}</b></div>
+        <div><span class="hint">TARIF PREDIKSI</span><br><b class="code">Rp${Number(k.TarifPrediksi).toLocaleString('id-ID')}</b></div>
+        <div><span class="hint">BILLING RIIL RS</span><br><b class="code">Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}</b></div>
+        <div><span class="hint">SELISIH</span><br><b class="code" style="color:${selisih>0?'var(--red)':'var(--teal-dk)'}">Rp${selisih.toLocaleString('id-ID')}</b>
+        <div>${selisih>0?'<span class="badge danger">Billing &gt; Prediksi (potensi rugi)</span>':'<span class="badge ok">Aman / margin positif</span>'}</div></div>
+      </div>
+    </div>
+    ${flagWarn && flagWarn.length ? `<div style="margin-top:12px">${flagWarn.map(f=>`<div class="flag-item warn">⚠️ ${f}</div>`).join("")}</div>` : ""}
+  `;
+}
+
+async function pagePulang(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Proses Pasien Pulang</h1><p class="sub">Langkah 6 — finalisasi kunjungan, hitung LOS, jalankan prediksi INA-CBG final</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  el.innerHTML += `<div class="card">
+    <label>Cara Keluar</label>
+    <select id="caraKeluar"><option>Pulang Normal</option><option>Pulang Paksa</option><option>Rujuk</option><option>Meninggal</option></select>
+    <div style="margin-top:12px"><button class="btn" onclick="submitPulang()">Proses Pulang</button></div>
+    <div id="resumeHasil" style="margin-top:16px"></div>
+  </div>`;
+}
+async function submitPulang(){
+  const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar")}, "POST");
+  if(r.ok){
+    toast("Pasien berhasil diproses pulang");
+    const k = r.prediksiINACBG;
+    document.getElementById("resumeHasil").innerHTML = `<div class="cbg-result">
+      <b>✅ Resume Selesai</b><br>
+      Kode CBG final: <b>${k.KodeCBGPrediksi}</b> — Rp${Number(k.TarifPrediksi).toLocaleString('id-ID')}<br>
+      Total Billing RS: Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}
+    </div>
+    <button class="btn ghost" style="margin-top:10px" onclick="tampilkanCetak('${state.activeKunjunganId}')">🖨️ Tampilkan Resume Medis & Kuitansi</button>
+    <div id="areaCetak" style="margin-top:14px"></div>`;
+  }
+}
+
+async function tampilkanCetak(kunjunganId){
+  const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
+  if(!d.ok){ toast("Gagal memuat data"); return; }
+  const p = d.pasien||{};
+  const totalBilling = d.billing.reduce((s,r)=>s+Number(r.Total||0),0);
+  const tglMasuk = d.rawatInap ? new Date(d.rawatInap.TglMasuk||d.rawatInap.tglMasuk).toLocaleDateString('id-ID') : "-";
+  const tglKeluar = d.rawatInap ? new Date(d.rawatInap.TglKeluar||d.rawatInap.tglKeluar||Date.now()).toLocaleDateString('id-ID') : new Date().toLocaleDateString('id-ID');
+  document.getElementById("areaCetak").innerHTML = `
+    <div class="resep-print">
+      <h2>RSU Allam Medica</h2>
+      <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Resume Medis & Kuitansi Pasien Pulang</div>
+      <div class="grid cols2" style="margin-bottom:10px;">
+        <div><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Jenis Kelamin:</b> ${p.jk||p.JK||"-"}</div>
+        <div><b>DPJP:</b> ${d.kunjungan.dpjp||d.kunjungan.DPJP||"-"}<br><b>Jenis Kunjungan:</b> ${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}<br>${d.rawatInap?`<b>Tgl Masuk – Keluar:</b> ${tglMasuk} – ${tglKeluar}`:""}</div>
+      </div>
+      <div class="section-title">Diagnosa</div>
+      <table><tr><th>Jenis</th><th>Kode ICD-10</th><th>Deskripsi</th></tr>
+        ${d.diagnosa.map(x=>`<tr><td>${x.jenis||x.JenisDiagnosa}</td><td>${x.kodeICD10||x.KodeICD10}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")||'<tr><td colspan="3" class="empty">-</td></tr>'}
+      </table>
+      <div class="section-title">Tindakan</div>
+      <table><tr><th>Kode ICD-9-CM</th><th>Deskripsi</th></tr>
+        ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")||'<tr><td colspan="2" class="empty">-</td></tr>'}
+      </table>
+      <div class="section-title">Kuitansi</div>
+      <table>
+        <tr><th>Kategori</th><th>Deskripsi</th><th>Qty</th><th>Total</th></tr>
+        ${d.billing.map(x=>`<tr><td>${x.kategori||x.Kategori}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.qty||x.Qty}</td><td>Rp${Number(x.Total).toLocaleString('id-ID')}</td></tr>`).join("")}
+        <tr class="total-row"><td colspan="3">TOTAL</td><td>Rp${totalBilling.toLocaleString('id-ID')}</td></tr>
+      </table>
+      ${d.klaim ? `<div class="section-title">Prediksi INA-CBG</div><div>Kode: <b>${d.klaim.KodeCBGPrediksi}</b> — Tarif: Rp${Number(d.klaim.TarifPrediksi).toLocaleString('id-ID')}</div>` : ""}
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>
+  `;
+}
+
+async function pageRekap(el){
+  el.innerHTML = `<h1>Rekap Klaim INA-CBG</h1><p class="sub">Seluruh prediksi klaim dari semua kunjungan</p><div id="rekapList"></div>`;
+  const rows = await api("getRekapKlaim", {}, "GET");
+  if(!rows.length){ document.getElementById("rekapList").innerHTML = `<div class="card empty">Belum ada data klaim</div>`; return; }
+  document.getElementById("rekapList").innerHTML = `<div class="card"><table>
+    <tr><th>Kunjungan</th><th>Kode CBG</th><th>Severity</th><th>Kelas</th><th>Tarif Prediksi</th><th>Billing RS</th><th>Selisih</th></tr>
+    ${rows.map(k=>`<tr><td>${k.KunjunganID}</td><td>${k.KodeCBGPrediksi}</td><td>${k.Severity}</td><td>${k.KelasRawat}</td>
+      <td>Rp${Number(k.TarifPrediksi).toLocaleString('id-ID')}</td><td>Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}</td>
+      <td style="color:${Number(k.Selisih)>0?'var(--red)':'var(--teal-dk)'}">Rp${Number(k.Selisih).toLocaleString('id-ID')}</td></tr>`).join("")}
+  </table></div>`;
+}
+
+async function pageAturanBA(el){
+  el.innerHTML = `<h1>Aturan Berita Acara Kesepakatan Bersama No. 3760/2024</h1>
+  <p class="sub">Kemenkes–BPJS Kesehatan · Panduan Penatalaksanaan Solusi Permasalahan Klaim INA-CBG · 4 kasus administrasi + 3 kasus medis. Sistem otomatis mencocokkan aturan ini ke diagnosa/tindakan saat menjalankan Prediksi INA-CBG.</p>
+  <div id="listAturan"></div>`;
+  const rows = await api("getAturanBA2024", {}, "GET");
+  const admin = rows.filter(r=>r.Ranah==="Administrasi"), medis = rows.filter(r=>r.Ranah==="Medis");
+  function renderGroup(title, items){
+    return `<div class="section-title">${title}</div>` + items.map(a=>`
+      <div class="card" style="margin-bottom:10px;">
+        <b>#${a.No} — ${a.Kasus}</b>
+        <p style="font-size:13px;margin:8px 0;">${a.Ketentuan}</p>
+        ${a.PerhatianKhusus && a.PerhatianKhusus!=="-" ? `<div class="flag-item warn">⚠️ ${a.PerhatianKhusus}</div>` : ""}
+      </div>`).join("");
+  }
+  document.getElementById("listAturan").innerHTML = renderGroup("Aspek Administrasi", admin) + renderGroup("Aspek Medis", medis);
+}
+
+render();
+</script>
+</body>
+</html>
