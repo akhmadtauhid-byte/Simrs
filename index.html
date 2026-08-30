@@ -151,7 +151,9 @@ const NAV = [
   {id:"inacbg", label:"5. Prediksi INA-CBG", step:"5"},
   {id:"pulang", label:"6. Proses Pulang", step:"6"},
   {id:"rekap", label:"Rekap Klaim", step:null},
-  {id:"aturanba", label:"📖 Aturan BA 2024", step:null},
+  {id:"aturanba", label:"📋 Aturan BA 2024", step:null},
+{id:"penunjang", label:"🧪 Unit Penunjang", step:null},
+{id:"tarif", label:"💰 Master Tarif", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -160,8 +162,8 @@ const ROLE_ACCESS = {
   pendaftaran: ["dashboard","pendaftaran","kunjungan"],
   rekammedis: ["dashboard","kunjungan","rekammedis","aturanba"],
   perawat: ["dashboard","kunjungan","rekammedis","aturanba"],
-  kasir: ["dashboard","kunjungan","billing"],
-  verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba"],
+  kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
+verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
 };
 function navAllowed(){
   if(!state.user) return [];
@@ -418,7 +420,7 @@ function render(){
   const pages = {
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,
     rekammedis: pageRekamMedis, billing: pageBilling, inacbg: pageInaCbg,
-    pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA
+    pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -772,6 +774,167 @@ async function pageAturanBA(el){
   document.getElementById("listAturan").innerHTML = renderGroup("Aspek Administrasi", admin) + renderGroup("Aspek Medis", medis);
 }
 
+async function pagePenunjang(el){
+  el.innerHTML = `<h1>Unit Penunjang</h1><p class="sub">Lab, Radiologi, Farmasi, Gizi, CSSD, Linen</p>
+    <div class="card">
+      <div id="penunjangTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="btn" onclick="renderPenunjangTab('lab')">Lab</button>
+        <button class="btn" onclick="renderPenunjangTab('rad')">Radiologi</button>
+        <button class="btn" onclick="renderPenunjangTab('farmasi')">Farmasi</button>
+        <button class="btn" onclick="renderPenunjangTab('gizi')">Gizi</button>
+        <button class="btn" onclick="renderPenunjangTab('cssd')">CSSD</button>
+        <button class="btn" onclick="renderPenunjangTab('linen')">Linen</button>
+      </div>
+      <div id="penunjangBody"></div>
+    </div>`;
+  renderPenunjangTab('lab');
+}
+
+async function renderPenunjangTab(tab){
+  const body = document.getElementById('penunjangBody');
+  if (!body) return;
+  if (tab === 'lab') {
+    body.innerHTML = `
+      <label>No. RM</label><input id="pj_norm">
+      <label>Nama Pasien</label><input id="pj_nama">
+      <label>Unit Asal</label><input id="pj_unit">
+      <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="Darah Rutin, dll">
+      <label>Dokter Pengirim</label><input id="pj_dokter">
+      <label>Harga (Rp)</label><input id="pj_harga" type="number">
+      <button class="btn" onclick="pjSubmit('lab.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),unitAsal:val('pj_unit'),jenisPemeriksaan:val('pj_jenis'),dokterPengirim:val('pj_dokter'),harga:Number(val('pj_harga'))||0,petugas:state.user.nama})">Simpan Order Lab</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('lab.listOrder', {}, 'POST');
+    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_Order','Nama_Pasien','Jenis_Pemeriksaan','Status']);
+  } else if (tab === 'rad') {
+    body.innerHTML = `
+      <label>No. RM</label><input id="pj_norm">
+      <label>Nama Pasien</label><input id="pj_nama">
+      <label>Unit Asal</label><input id="pj_unit">
+      <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="Rontgen Thorax, dll">
+      <label>Dokter Pengirim</label><input id="pj_dokter">
+      <label>Harga (Rp)</label><input id="pj_harga" type="number">
+      <button class="btn" onclick="pjSubmit('rad.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),unitAsal:val('pj_unit'),jenisPemeriksaan:val('pj_jenis'),dokterPengirim:val('pj_dokter'),harga:Number(val('pj_harga'))||0,petugas:state.user.nama})">Simpan Order Radiologi</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('rad.listOrder', {}, 'POST');
+    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_Order','Nama_Pasien','Jenis_Pemeriksaan','Status']);
+  } else if (tab === 'farmasi') {
+    body.innerHTML = `
+      <label>No. RM</label><input id="pj_norm">
+      <label>Nama Pasien</label><input id="pj_nama">
+      <label>Dokter</label><input id="pj_dokter">
+      <label>Kode Obat</label><input id="pj_kode">
+      <label>Jumlah</label><input id="pj_jumlah" type="number">
+      <label>Aturan Pakai</label><input id="pj_aturan" placeholder="3x1 sesudah makan">
+      <button class="btn" onclick="pjSubmit('farmasi.buatResep',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),dokter:val('pj_dokter'),petugas:state.user.nama,items:[{kode:val('pj_kode'),jumlah:Number(val('pj_jumlah'))||1,aturanPakai:val('pj_aturan')}]})">Simpan Resep</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('farmasi.cekStokMinimal', {}, 'POST');
+    document.getElementById('pjList').innerHTML = '<b>Stok kritis:</b>' + pjTable(rows, ['Nama_Obat','Stok','Stok_Minimal']);
+  } else if (tab === 'gizi') {
+    body.innerHTML = `
+      <label>No. RM</label><input id="pj_norm">
+      <label>Nama Pasien</label><input id="pj_nama">
+      <label>Ruang/Kelas</label><input id="pj_ruang">
+      <label>Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
+      <label>Alergi/Pantangan</label><input id="pj_alergi">
+      <button class="btn" onclick="pjSubmit('gizi.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama})">Simpan Order Diet</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('gizi.listAktif', {}, 'POST');
+    document.getElementById('pjList').innerHTML = pjTable(rows, ['Nama_Pasien','Ruang_Kelas','Jenis_Diet']);
+  } else if (tab === 'cssd') {
+    body.innerHTML = `
+      <label>Unit Asal</label><input id="pj_unit">
+      <label>Jenis Alat/Set</label><input id="pj_jenis">
+      <label>Jumlah</label><input id="pj_jumlah" type="number">
+      <button class="btn" onclick="pjSubmit('cssd.terimaAlat',{unitAsal:val('pj_unit'),jenisAlat:val('pj_jenis'),jumlah:Number(val('pj_jumlah'))||1,petugas:state.user.nama})">Simpan</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('cssd.listAktif', {}, 'POST');
+    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_CSSD','Unit_Asal','Jenis_Alat_Set','Status']);
+  } else if (tab === 'linen') {
+    body.innerHTML = `
+      <label>Unit Asal</label><input id="pj_unit">
+      <label>Jenis Linen</label><input id="pj_jenis">
+      <label>Jumlah Kotor</label><input id="pj_jumlah" type="number">
+      <button class="btn" onclick="pjSubmit('linen.setorKotor',{unitAsal:val('pj_unit'),jenisLinen:val('pj_jenis'),jumlahKotor:Number(val('pj_jumlah'))||0,petugas:state.user.nama})">Simpan</button>
+      <div id="pjList" style="margin-top:14px"></div>`;
+    const rows = await api('linen.listProses', {}, 'POST');
+    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_Linen','Unit_Asal','Jenis_Linen','Jumlah_Kotor']);
+  }
+}
+
+async function pjSubmit(action, data){
+  const r = await api(action, data, 'POST');
+  if (r && (r.id || r.ok)) { toast('Tersimpan'); }
+  else { toast((r && r.error) || 'Gagal menyimpan'); }
+  const tabMap = { 'lab.buatOrder':'lab','rad.buatOrder':'rad','farmasi.buatResep':'farmasi','gizi.buatOrder':'gizi','cssd.terimaAlat':'cssd','linen.setorKotor':'linen' };
+  renderPenunjangTab(tabMap[action] || 'lab');
+}
+
+function pjTable(rows, cols){
+  if (!rows || !rows.length) return '<p class="sub">Belum ada data.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr>' + cols.map(c => `<th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">${c}</th>`).join('') + '</tr>' +
+    rows.map(r => '<tr>' + cols.map(c => `<td style="padding:6px;border-bottom:1px solid var(--line)">${r[c] ?? ''}</td>`).join('') + '</tr>').join('') +
+    '</table>';
+}
+
+/* ================== MASTER TARIF ================== */
+async function pageTarif(el){
+  el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, Layanan Lain</p>
+    <div class="card">
+      <div style="display:flex;gap:6px;margin-bottom:14px;">
+        <button class="btn" onclick="renderTarifTab('inap')">Rawat Inap</button>
+        <button class="btn" onclick="renderTarifTab('jalan')">Rawat Jalan</button>
+        <button class="btn" onclick="renderTarifTab('layanan')">Layanan Lain</button>
+      </div>
+      <div id="tarifBody"></div>
+    </div>`;
+  renderTarifTab('inap');
+}
+
+async function renderTarifTab(tab){
+  const body = document.getElementById('tarifBody');
+  if (tab === 'inap') {
+    body.innerHTML = `
+      <label>Kode Kelas</label><input id="tf_kode" placeholder="KLS3, VIP, ICU">
+      <label>Nama Kelas</label><input id="tf_nama">
+      <label>Tarif Kamar/Hari</label><input id="tf_kamar" type="number">
+      <label>Tarif Visite Umum</label><input id="tf_visu" type="number">
+      <label>Tarif Visite Spesialis</label><input id="tf_viss" type="number">
+      <label>Tarif Asuhan Keperawatan</label><input id="tf_asuhan" type="number">
+      <button class="btn" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0},'inap')">Simpan</button>
+      <div id="tfList" style="margin-top:14px"></div>`;
+    const rows = await api('tarif.listRawatInap', {}, 'POST');
+    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Kelas','Nama_Kelas','Tarif_Kamar_Per_Hari','Tarif_Visite_Dokter_Umum','Tarif_Visite_Dokter_Spesialis']);
+  } else if (tab === 'jalan') {
+    body.innerHTML = `
+      <label>Kode Poli</label><input id="tf_kode">
+      <label>Nama Poli</label><input id="tf_nama">
+      <label>Tarif Konsultasi Umum</label><input id="tf_umum" type="number">
+      <label>Tarif Konsultasi Spesialis</label><input id="tf_spesialis" type="number">
+      <label>Tarif Administrasi</label><input id="tf_admin" type="number">
+      <button class="btn" onclick="tfSubmit('tarif.tambahPoli',{kode:val('tf_kode'),nama:val('tf_nama'),tarifUmum:Number(val('tf_umum'))||0,tarifSpesialis:Number(val('tf_spesialis'))||0,tarifAdministrasi:Number(val('tf_admin'))||0},'jalan')">Simpan</button>
+      <div id="tfList" style="margin-top:14px"></div>`;
+    const rows = await api('tarif.listRawatJalan', {}, 'POST');
+    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Poli','Nama_Poli','Tarif_Konsultasi_Umum','Tarif_Konsultasi_Spesialis']);
+  } else if (tab === 'layanan') {
+    body.innerHTML = `
+      <label>Kode Layanan</label><input id="tf_kode">
+      <label>Kategori</label><input id="tf_kategori" placeholder="Lab, Radiologi, Tindakan, Ambulans">
+      <label>Nama Layanan</label><input id="tf_nama">
+      <label>Satuan</label><input id="tf_satuan" placeholder="Per Tindakan">
+      <label>Tarif (Rp)</label><input id="tf_tarif" type="number">
+      <button class="btn" onclick="tfSubmit('tarif.tambahLayanan',{kode:val('tf_kode'),kategori:val('tf_kategori'),nama:val('tf_nama'),satuan:val('tf_satuan'),tarif:Number(val('tf_tarif'))||0},'layanan')">Simpan</button>
+      <div id="tfList" style="margin-top:14px"></div>`;
+    const rows = await api('tarif.listLayanan', {}, 'POST');
+    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Layanan','Kategori','Nama_Layanan','Tarif']);
+  }
+}
+
+async function tfSubmit(action, data, tab){
+  const r = await api(action, data, 'POST');
+  if (r && r.ok) { toast('Tersimpan'); } else { toast((r && r.error) || 'Gagal menyimpan'); }
+  renderTarifTab(tab);
+}
 render();
 </script>
 </body>
