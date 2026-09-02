@@ -146,6 +146,7 @@ const NAV = [
   {id:"dashboard", label:"Dashboard", step:null},
   {id:"pendaftaran", label:"1. Pendaftaran", step:"1"},
   {id:"kunjungan", label:"2. Kunjungan Aktif", step:"2"},
+  {id:"igd", label:"🚑 IGD", step:null},
   {id:"rekammedis", label:"3. Diagnosa & Tindakan", step:"3"},
   {id:"billing", label:"4. Billing", step:"4"},
   {id:"inacbg", label:"5. Prediksi INA-CBG", step:"5"},
@@ -160,8 +161,8 @@ const NAV = [
 const ROLE_ACCESS = {
   admin: NAV.map(n=>n.id),
   pendaftaran: ["dashboard","pendaftaran","kunjungan"],
-  rekammedis: ["dashboard","kunjungan","rekammedis","aturanba"],
-  perawat: ["dashboard","kunjungan","rekammedis","aturanba"],
+  rekammedis: ["dashboard","kunjungan","rekammedis","aturanba","igd"],
+  perawat: ["dashboard","kunjungan","rekammedis","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
 };
@@ -418,7 +419,7 @@ function render(){
   renderNav();
   const m = document.getElementById("main");
   const pages = {
-    dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,
+    dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
     rekammedis: pageRekamMedis, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif
   };
@@ -426,7 +427,193 @@ function render(){
   const holder = document.createElement("div"); m.appendChild(holder);
   pages[state.page](holder);
 }
+<!--
+============================================================
+HALAMAN BARU: IGD
+============================================================
+CARA PASANG (frontend):
+1. Tambahkan kode di bawah ini ke index.html (Apps Script
+   DAN GitHub repo), taruh di dekat fungsi pageDaftar/
+   pagePendaftaran lain
+2. Tambahkan tombol menu "IGD" di sidebar - kirim screenshot
+   bagian kode sidebar/menu Anda, saya kasih instruksi
+   penyambungan yang pas ke pola menu yang sudah ada
+============================================================
+-->
 
+<style>
+.triase-Merah { border-left:5px solid #c0392b; background:#fdecea; }
+.triase-Kuning { border-left:5px solid #e0a800; background:#fff8e6; }
+.triase-Hijau { border-left:5px solid #27ae60; background:#eafaf1; }
+.triase-Hitam { border-left:5px solid #2c3e50; background:#ecf0f1; }
+.triase-badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; color:#fff; }
+.badge-Merah { background:#c0392b; }
+.badge-Kuning { background:#e0a800; }
+.badge-Hijau { background:#27ae60; }
+.badge-Hitam { background:#2c3e50; }
+.igd-card { border-radius:8px; padding:10px 14px; margin-bottom:8px; cursor:pointer; }
+.igd-card:hover { filter:brightness(0.97); }
+.vital-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+</style>
+
+<script>
+// ================== PAPAN IGD (daftar pasien aktif, urut prioritas) ==================
+async function pageIGD(el){
+  el.innerHTML = `<h1>IGD</h1><p class="sub">Papan pasien aktif, urut prioritas triase</p>
+    <div style="margin-bottom:12px">
+      <button class="btn" onclick="mulaiTriaseBaru()">+ Triase Pasien Baru (dari Kunjungan IGD)</button>
+    </div>
+    <div id="papanIGD"></div>
+    <div id="areaDetailIGD" style="margin-top:16px"></div>`;
+  await muatPapanIGD();
+}
+
+async function muatPapanIGD(){
+  const r = await api("getPasienIGDAktif", {}, "GET");
+  if(!r || !r.ok){ document.getElementById("papanIGD").innerHTML = "Gagal memuat data"; return; }
+  if(!r.jumlah){ document.getElementById("papanIGD").innerHTML = `<p class="hint">Tidak ada pasien di observasi IGD saat ini.</p>`; return; }
+
+  let html = `<p class="hint">${r.jumlah} pasien sedang observasi</p>`;
+  r.pasien.forEach(p=>{
+    html += `<div class="igd-card triase-${p.triase}" onclick="bukaDetailIGD('${p.igdId}')">
+      <span class="triase-badge badge-${p.triase}">${p.triase}</span>
+      <b style="margin-left:8px">${p.nama}</b> <span style="color:#666">(${p.rm})</span>
+      <br><span style="font-size:13px;color:#555">${p.keluhan || '-'}</span>
+      <br><span style="font-size:12px;color:#888">Sudah ${p.menitBerjalan} menit di IGD</span>
+    </div>`;
+  });
+  document.getElementById("papanIGD").innerHTML = html;
+}
+
+// ================== TRIASE PASIEN BARU ==================
+function mulaiTriaseBaru(){
+  document.getElementById("areaDetailIGD").innerHTML = `
+    <div class="card">
+      <div class="section-title">Triase Pasien</div>
+      <label>Kunjungan ID (dari Pendaftaran, Jenis Kunjungan = IGD)</label>
+      <input id="tKunjunganId" placeholder="cth: KJ...">
+      <label>Tingkat Triase</label>
+      <select id="tTriase">
+        <option value="Merah">Merah - Gawat Darurat (immediate)</option>
+        <option value="Kuning">Kuning - Urgent</option>
+        <option value="Hijau">Hijau - Non-urgent</option>
+        <option value="Hitam">Hitam - DOA / Meninggal</option>
+      </select>
+      <label>Keluhan saat Triase</label><textarea id="tKeluhan"></textarea>
+      <div class="section-title" style="margin-top:12px">TTV Awal</div>
+      <div class="vital-grid">
+        <div><label>TD (mmHg)</label><input id="tTD" placeholder="120/80"></div>
+        <div><label>Nadi (x/mnt)</label><input id="tNadi"></div>
+        <div><label>RR (x/mnt)</label><input id="tRR"></div>
+        <div><label>Suhu (°C)</label><input id="tSuhu"></div>
+        <div><label>SpO2 (%)</label><input id="tSpO2"></div>
+        <div><label>GCS</label><input id="tGCS" placeholder="E4V5M6"></div>
+      </div>
+      <label>Petugas Triase</label><input id="tPetugas">
+      <div style="margin-top:12px"><button class="btn" onclick="submitTriase()">Simpan Triase</button></div>
+      <div class="hint" id="hasilTriase"></div>
+    </div>`;
+}
+
+async function submitTriase(){
+  const data = {
+    kunjunganId: val("tKunjunganId"), triase: val("tTriase"), keluhanTriase: val("tKeluhan"),
+    td: val("tTD"), nadi: val("tNadi"), rr: val("tRR"), suhu: val("tSuhu"), spo2: val("tSpO2"), gcs: val("tGCS"),
+    petugas: val("tPetugas")
+  };
+  if(!data.kunjunganId){ toast("Kunjungan ID wajib diisi"); return; }
+  const r = await api("triaseIGD", data, "POST");
+  if(r.ok){
+    document.getElementById("hasilTriase").innerHTML = `✅ Triase tersimpan: <b>${r.igdId}</b>`;
+    toast("Triase tersimpan");
+    muatPapanIGD();
+    bukaDetailIGD(r.igdId);
+  } else { toast(r.msg || "Gagal menyimpan triase"); }
+}
+
+// ================== DETAIL IGD: OBSERVASI + KEPUTUSAN ==================
+async function bukaDetailIGD(igdId){
+  const r = await api("getDetailIGD", {igdId}, "POST");
+  if(!r.ok){ toast(r.msg); return; }
+  const igd = r.igd, pasien = r.pasien;
+
+  let htmlObs = "";
+  r.observasi.forEach(o=>{
+    htmlObs += `<div class="riwayat-item" style="border-left:3px solid #0f4c5c;padding:6px 12px;margin-bottom:6px;background:#fafafa">
+      <b>${new Date(o.Waktu).toLocaleString('id-ID')}</b><br>
+      TD: ${o.TD||'-'} · Nadi: ${o.Nadi||'-'} · RR: ${o.RR||'-'} · Suhu: ${o.Suhu||'-'} · SpO2: ${o.SpO2||'-'} · GCS: ${o.GCS||'-'}
+      ${o.Catatan ? '<br>Catatan: '+o.Catatan : ''}
+    </div>`;
+  });
+
+  document.getElementById("areaDetailIGD").innerHTML = `
+    <div class="card triase-${igd.Triase}">
+      <div class="section-title">${pasien ? pasien.Nama : '-'} (${igd.RM}) <span class="triase-badge badge-${igd.Triase}">${igd.Triase}</span></div>
+      <p class="hint">Keluhan: ${igd.KeluhanTriase || '-'} · Status: ${igd.Status}</p>
+      <p class="hint">TTV awal - TD: ${igd.TD||'-'} · Nadi: ${igd.Nadi||'-'} · RR: ${igd.RR||'-'} · Suhu: ${igd.Suhu||'-'} · SpO2: ${igd.SpO2||'-'}</p>
+    </div>
+
+    ${igd.Status === "Observasi" ? `
+    <div class="card">
+      <div class="section-title">Tambah Observasi</div>
+      <div class="vital-grid">
+        <div><label>TD</label><input id="oTD"></div>
+        <div><label>Nadi</label><input id="oNadi"></div>
+        <div><label>RR</label><input id="oRR"></div>
+        <div><label>Suhu</label><input id="oSuhu"></div>
+        <div><label>SpO2</label><input id="oSpO2"></div>
+        <div><label>GCS</label><input id="oGCS"></div>
+      </div>
+      <label>Catatan</label><textarea id="oCatatan"></textarea>
+      <label>Petugas</label><input id="oPetugas">
+      <div style="margin-top:8px"><button class="btn secondary" onclick="submitObservasi('${igd.IGDID}')">Simpan Observasi</button></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Keputusan Akhir</div>
+      <label>Keputusan</label>
+      <select id="kKeputusan" onchange="toggleFormAdmisi()">
+        <option>Pulang</option><option>Rawat Inap</option><option>Rujuk</option><option>Meninggal Dunia</option>
+      </select>
+      <div id="areaAdmisiIGD" style="display:none">
+        <div class="row"><div><label>Ruangan</label><input id="kRuangan"></div><div><label>Kelas</label><input id="kKelas"></div></div>
+      </div>
+      <label>Dokter Jaga</label><input id="kDokter">
+      <label>Catatan</label><textarea id="kCatatan"></textarea>
+      <div style="margin-top:8px"><button class="btn" onclick="submitKeputusan('${igd.IGDID}')">Simpan Keputusan</button></div>
+      <div class="hint" id="hasilKeputusan"></div>
+    </div>
+    ` : `<div class="card"><b>Keputusan:</b> ${igd.Keputusan} pada ${new Date(igd.JamKeputusan).toLocaleString('id-ID')}<br>Dokter: ${igd.DokterJaga}<br>Catatan: ${igd.CatatanKeputusan||'-'}</div>`}
+
+    <div class="card">
+      <div class="section-title">Riwayat Observasi</div>
+      ${htmlObs || '<p class="hint">Belum ada observasi tercatat</p>'}
+    </div>`;
+}
+
+function toggleFormAdmisi(){
+  document.getElementById("areaAdmisiIGD").style.display = val("kKeputusan")==="Rawat Inap" ? "block" : "none";
+}
+
+async function submitObservasi(igdId){
+  const data = { igdId, td:val("oTD"), nadi:val("oNadi"), rr:val("oRR"), suhu:val("oSuhu"),
+    spo2:val("oSpO2"), gcs:val("oGCS"), catatan:val("oCatatan"), petugas:val("oPetugas") };
+  const r = await api("tambahObservasiIGD", data, "POST");
+  if(r.ok){ toast("Observasi tersimpan"); bukaDetailIGD(igdId); }
+  else { toast(r.msg || "Gagal"); }
+}
+
+async function submitKeputusan(igdId){
+  const data = { igdId, keputusan: val("kKeputusan"), dokterJaga: val("kDokter"), catatan: val("kCatatan"),
+    ruangan: val("kRuangan"), kelas: val("kKelas") };
+  const r = await api("putuskanIGD", data, "POST");
+  if(r.ok){
+    document.getElementById("hasilKeputusan").innerHTML = `✅ ${r.msg}`;
+    toast(r.msg);
+    muatPapanIGD();
+  } else { toast(r.msg || "Gagal menyimpan keputusan"); }
+}
+</script>
 async function pageDashboard(el){
   el.innerHTML = `<h1>Dashboard</h1><p class="sub">Ringkasan operasional hari ini</p><div class="grid cols4" id="stats"></div>`;
   const r = await api("getDashboard", {}, "GET");
