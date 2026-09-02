@@ -440,26 +440,34 @@ async function pageDashboard(el){
   `;
 }
 
-function pagePendaftaran(el){
-  el.innerHTML = `
-    <h1>Pendaftaran Pasien</h1><p class="sub">Langkah 1 — daftar pasien baru / cari pasien lama, lalu buat kunjungan</p>
+// ================== GANTI SELURUH pagePendaftaran + submitPasienBaru + submitKunjungan DENGAN INI ==================
+
+async function pagePendaftaran(el){
+  el.innerHTML = `<h1>Pendaftaran Pasien</h1><p class="sub">Langkah 1 - daftar pasien baru / cari pasien lama, lalu buat kunjungan</p>
+    <div id="dashRegistrasi"></div>
     <div class="grid cols2">
       <div class="card">
         <div class="section-title">Pasien Baru</div>
-        <div class="row"><div><label>Nama Lengkap</label><input id="nama"></div><div><label>NIK</label><input id="nik"></div></div>
+        <div class="row"><div><label>Nama Lengkap</label><input id="nama"></div><div><label>NIK</label><input id="nik" maxlength="16" placeholder="16 digit, kosongkan jika belum ada"></div></div>
         <div class="row"><div><label>Tanggal Lahir</label><input type="date" id="tglLahir"></div>
           <div><label>Jenis Kelamin</label><select id="jk"><option>Laki-laki</option><option>Perempuan</option></select></div></div>
         <label>Alamat</label><textarea id="alamat"></textarea>
         <div class="row"><div><label>No. HP</label><input id="noHP"></div>
-          <div><label>Penjamin</label><select id="penjamin"><option>BPJS</option><option>Umum</option><option>Asuransi Lain</option></select></div></div>
-        <label>No. Kartu BPJS (jika ada)</label><input id="noKartuBPJS">
+          <div><label>Nama Ibu Kandung</label><input id="namaIbu"></div></div>
+        <div class="row"><div><label>Penjamin</label><select id="penjamin" onchange="toggleBPJS()"><option>Umum</option><option>BPJS</option><option>Asuransi Lain</option></select></div>
+          <div id="areaBPJS" style="display:none"><label>No. Kartu BPJS</label><input id="noKartuBPJS"></div></div>
+        <div class="row"><div><label>Golongan Darah</label><select id="golDarah"><option></option><option>A</option><option>B</option><option>AB</option><option>O</option></select></div>
+          <div><label>Alergi</label><input id="alergi" placeholder="cth: Penisilin, tidak ada"></div></div>
+        <div class="row"><div><label>Kontak Darurat - Nama</label><input id="kdNama"></div>
+          <div><label>Kontak Darurat - No. HP</label><input id="kdHP"></div></div>
         <div style="margin-top:12px"><button class="btn" onclick="submitPasienBaru()">Daftarkan Pasien</button></div>
         <div class="hint" id="hasilDaftar"></div>
       </div>
       <div class="card">
         <div class="section-title">Buat Kunjungan</div>
         <label>Cari Pasien (No. RM / Nama)</label>
-        <input id="cariRM" placeholder="Ketik No. RM setelah pasien terdaftar...">
+        <input id="cariRM" oninput="cariPasienLive()" placeholder="Ketik No. RM setelah pasien terdaftar...">
+        <div id="hasilCariPasien"></div>
         <div class="row"><div><label>Jenis Kunjungan</label><select id="jenisKunjungan"><option>Rawat Jalan</option><option>Rawat Inap</option><option>IGD</option></select></div>
           <div><label>Poli / Ruangan Tujuan</label><input id="poliRuangan" placeholder="cth: Poli Penyakit Dalam"></div></div>
         <div class="row"><div><label>DPJP</label><input id="dpjp" placeholder="dr. ..."></div>
@@ -467,27 +475,117 @@ function pagePendaftaran(el){
         <label>Keluhan Utama</label><textarea id="keluhanUtama"></textarea>
         <div style="margin-top:12px"><button class="btn" onclick="submitKunjungan()">Buat Kunjungan</button></div>
         <div class="hint" id="hasilKunjungan"></div>
+        <div id="areaRiwayatPasien"></div>
       </div>
     </div>`;
+
+  const dash = await api("getDashboardRegistrasiHariIni", {}, "GET");
+  if (dash && dash.ok){
+    let html = `<div style="margin-bottom:12px">`;
+    html += `<div class="card stat" style="display:inline-block;min-width:110px;margin-right:8px"><b>${dash.totalHariIni}</b><span> Total Hari Ini</span></div>`;
+    Object.keys(dash.perJenis).forEach(j=>{
+      html += `<div class="card stat" style="display:inline-block;min-width:110px;margin-right:8px"><b>${dash.perJenis[j]}</b><span> ${j}</span></div>`;
+    });
+    html += `</div>`;
+    document.getElementById("dashRegistrasi").innerHTML = html;
+  }
 }
+
+function toggleBPJS(){
+  document.getElementById("areaBPJS").style.display = val("penjamin")==="BPJS" ? "block" : "none";
+}
+
 let lastRM = null;
-async function submitPasienBaru(){
-  const data = {nama:val("nama"), nik:val("nik"), tglLahir:val("tglLahir"), jk:val("jk"),
-    alamat:val("alamat"), noHP:val("noHP"), penjamin:val("penjamin"), noKartuBPJS:val("noKartuBPJS")};
+
+async function submitPasienBaru(lewatiCekDuplikat){
+  const data = {
+    nama: val("nama"), nik: val("nik"), tglLahir: val("tglLahir"), jk: val("jk"),
+    alamat: val("alamat"), noHP: val("noHP"), namaIbuKandung: val("namaIbu"),
+    penjamin: val("penjamin"), noKartuBPJS: val("noKartuBPJS"),
+    golonganDarah: val("golDarah"), alergi: val("alergi"),
+    kontakDaruratNama: val("kdNama"), kontakDaruratHP: val("kdHP"),
+    lewatiCekDuplikat: !!lewatiCekDuplikat
+  };
   if(!data.nama){ toast("Nama wajib diisi"); return; }
-  const r = await api("daftarPasienBaru", data, "POST");
-  if(r.ok){ lastRM=r.rm; document.getElementById("hasilDaftar").innerHTML = `✅ Terdaftar dengan No. RM: <b>${r.rm}</b>`;
-    document.getElementById("cariRM").value = r.rm; toast("Pasien baru terdaftar: "+r.rm); }
+
+  const r = await api("daftarPasienBaruV2", data, "POST");
+
+  if(!r.ok && r.duplikat){
+    let html = `<div style="border:1px solid #c0392b;background:#fdecea;border-radius:8px;padding:10px;margin-top:8px">
+      ⚠️ Kemungkinan pasien ini sudah terdaftar. Periksa dulu:</div>`;
+    r.kandidat.forEach(k=>{
+      html += `<div style="border:1px solid #e0a800;background:#fff8e6;border-radius:8px;padding:8px 12px;margin-top:6px;cursor:pointer" onclick="pakaiRMLama('${k.rm}')">
+        <b>${k.rm}</b> — ${k.nama}<br><span style="font-size:12px;color:#666">${k.alasan} · NIK: ${k.nik||'-'} · HP: ${k.noHP||'-'}</span>
+        <br><span style="font-size:12px;color:#0f4c5c">Klik untuk pakai No. RM ini di form kunjungan →</span>
+      </div>`;
+    });
+    html += `<button class="btn secondary" style="margin-top:8px" onclick="submitPasienBaru(true)">Bukan orang yang sama, tetap daftarkan sebagai pasien baru</button>`;
+    document.getElementById("hasilDaftar").innerHTML = html;
+    return;
+  }
+
+  if(r.ok){
+    lastRM = r.rm;
+    document.getElementById("hasilDaftar").innerHTML = `✅ Terdaftar dengan No. RM: <b>${r.rm}</b>`;
+    document.getElementById("cariRM").value = r.rm;
+    toast("Pasien baru terdaftar: " + r.rm);
+  } else {
+    toast(r.msg || "Gagal mendaftarkan pasien");
+  }
 }
+
+function pakaiRMLama(rm){
+  document.getElementById("cariRM").value = rm;
+  document.getElementById("hasilDaftar").innerHTML = `Menggunakan No. RM lama: <b>${rm}</b>`;
+  toast("No. RM " + rm + " dipakai untuk kunjungan");
+}
+
+let timerCariPasien;
+function cariPasienLive(){
+  clearTimeout(timerCariPasien);
+  const q = val("cariRM");
+  if(q.length < 3){ document.getElementById("hasilCariPasien").innerHTML = ""; return; }
+  timerCariPasien = setTimeout(async ()=>{
+    const hasil = await api("searchPasien", {q}, "GET");
+    let html = "";
+    (hasil||[]).forEach(p=>{
+      html += `<div style="border:1px solid #ddd;border-radius:6px;padding:6px 10px;margin-top:4px;cursor:pointer" onclick="pilihDariPencarian('${p.RM}')">
+        <b>${p.RM}</b> — ${p.Nama} <span style="font-size:12px;color:#666">(${p.NoHP||'-'})</span></div>`;
+    });
+    document.getElementById("hasilCariPasien").innerHTML = html;
+  }, 300);
+}
+
+function pilihDariPencarian(rm){
+  document.getElementById("cariRM").value = rm;
+  document.getElementById("hasilCariPasien").innerHTML = "";
+  lihatRiwayatSingkat(rm);
+}
+
+async function lihatRiwayatSingkat(rm){
+  const r = await api("getRiwayatPasien", {rm}, "POST");
+  if(!r || !r.ok) return;
+  let html = `<div class="hint" style="margin-top:6px">Total kunjungan sebelumnya: <b>${r.totalKunjungan}</b></div>`;
+  document.getElementById("areaRiwayatPasien").innerHTML = html;
+}
+
 async function submitKunjungan(){
   const rm = val("cariRM") || lastRM;
   if(!rm){ toast("Isi/cari No. RM dulu"); return; }
-  const data = {rm, RM:rm, jenisKunjungan:val("jenisKunjungan"), JenisKunjungan:val("jenisKunjungan"),
-    poliRuangan:val("poliRuangan"), dpjp:val("dpjp"), keluhanUtama:val("keluhanUtama"), petugas:val("petugas")};
-  const r = await api("buatKunjungan", data, "POST");
-  if(r.ok){ document.getElementById("hasilKunjungan").innerHTML = `✅ Kunjungan dibuat: <b>${r.kunjunganId}</b>`;
-    state.activeKunjunganId = r.kunjunganId; toast("Kunjungan dibuat, lanjut ke tahap berikutnya"); }
+  const data = {rm, jenisKunjungan:val("jenisKunjungan"), poliRuangan:val("poliRuangan"),
+    dpjp:val("dpjp"), keluhanUtama:val("keluhanUtama"), petugas:val("petugas")};
+  const r = await api("registrasiPasienLamaLengkap", data, "POST");
+  if(r.ok){
+    document.getElementById("hasilKunjungan").innerHTML =
+      `✅ Kunjungan dibuat: <b>${r.kunjunganId}</b><br>
+       Nomor Antrian: <span style="display:inline-block;background:#0f4c5c;color:#fff;padding:4px 12px;border-radius:6px;font-family:monospace;font-size:18px">${r.noAntrian}</span>`;
+    state.activeKunjunganId = r.kunjunganId;
+    toast("Kunjungan dibuat - No. Antrian " + r.noAntrian);
+  } else {
+    toast(r.msg || "Gagal membuat kunjungan");
+  }
 }
+
 function val(id){ return document.getElementById(id).value.trim(); }
 
 /* ============ Pencarian kode ICD-10 / ICD-9-CM ============ */
