@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SIMRS Allam Medica</title>
+<!-- Fase 2: klien Supabase (menggantikan Google Apps Script). Pin versi 2.x supaya stabil. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root{
     --ink:#12242b;
@@ -141,10 +143,18 @@
 <div class="toast" id="toast"></div>
 
 <script>
-/* ================= KONFIGURASI ================= */
-// GANTI dengan Web App URL hasil deploy Apps Script Anda (Code.gs)
-const API_URL = "https://script.google.com/macros/s/AKfycbxARMZjrspOXSQIZdWzl5Ga13nfno8jqDR6j2s41KLVstusAI2p_AlsLpTGHFLsf8QvHg/exec";
-const DEMO_MODE = API_URL.indexOf("http") !== 0; // true selama URL belum diisi -> pakai data lokal simulasi
+/* ================= KONFIGURASI SUPABASE (Fase 2) ================= */
+// GANTI dengan URL & anon key project Supabase Anda: Project Settings -> API.
+// anon key AMAN ditaruh di frontend (bukan rahasia) — akses sesungguhnya
+// tetap dijaga oleh Row Level Security di database, bukan oleh key ini.
+const SUPABASE_URL = "https://cduhicndsaeuxstpxthh.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkdWhpY25kc2FldXhzdHB4dGhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjE5MzMsImV4cCI6MjEwNDA5NzkzM30.oBEx-UxyglaQykDpzeZTCDNQXU5x-mQRQjZNlx3SXBM";
+const DEMO_MODE = SUPABASE_URL.indexOf("http") !== 0; // true selama URL belum diisi -> pakai data lokal simulasi (tanpa backend nyata)
+const supabase = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Form login masih pakai field "Username" seperti sebelumnya; supaya tetap bisa
+// memakai Supabase Auth (yang berbasis email), username dipetakan ke alamat
+// email "<username>@simrs.local" saat membuat akun staf di Supabase Auth.
+const EMAIL_DOMAIN = "simrs.local";
 
 /* ================= STATE ================= */
 let state = {
@@ -200,7 +210,7 @@ function goTo(page){
   if(!navAllowed().includes(page)){ toast("Menu ini tidak tersedia untuk role Anda"); return; }
   state.page = page; render();
 }
-function logout(){ state.user = null; render(); }
+function logout(){ if(!DEMO_MODE) supabase.auth.signOut(); state.user = null; render(); }
 function toast(msg){
   const t = document.getElementById("toast");
   t.textContent = msg; t.classList.add("show");
@@ -245,15 +255,30 @@ function rebuildAppShell(){
 
 async function api(action, data, method){
   if (DEMO_MODE) return localApi(action, data);
-  try{
-    if (method === "GET"){
-      const qs = new URLSearchParams({action, ...data}).toString();
-      const res = await fetch(`${API_URL}?${qs}`);
-      return await res.json();
-    } else {
-      const res = await fetch(API_URL, {method:"POST", body: JSON.stringify({action, data})});
-      return await res.json();
+
+  // Login ditangani khusus lewat Supabase Auth (bukan tabel biasa), supaya
+  // password benar-benar di-hash & dikelola sistem, bukan dibandingkan
+  // sebagai teks polos seperti mode demo lama.
+  if (action === "login"){
+    const username = (data && data.username || "").trim();
+    const password = (data && data.password || "").trim();
+    if(!username || !password) return {ok:false, msg:"Username & password wajib diisi"};
+    const email = `${username}@${EMAIL_DOMAIN}`;
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    if (authError || !authData.user) return {ok:false, msg:"Username / password salah"};
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles").select("nama, role, aktif").eq("id", authData.user.id).single();
+    if (profileError || !profile || !profile.aktif){
+      await supabase.auth.signOut();
+      return {ok:false, msg:"Akun tidak ditemukan / tidak aktif. Hubungi admin."};
     }
+    return {ok:true, nama: profile.nama, role: profile.role};
+  }
+
+  try{
+    const { data: result, error } = await supabase.rpc("api_dispatch", { p_action: action, p_payload: data || {} });
+    if (error){ toast("Gagal hubungi server: " + error.message); return {ok:false, msg: error.message}; }
+    return result;
   }catch(err){
     toast("Gagal hubungi server: " + err.message);
     return {ok:false, msg: err.message};
@@ -903,11 +928,11 @@ async function submitAdmisi(){
 }
 async function submitDiagnosa(){
   const r = await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
-  if(r.ok){ toast("Diagnosa ditambahkan"); render(); }
+  if(r.ok){ toast("Diagnosa ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan diagnosa"); }
 }
 async function submitTindakan(){
   const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksana:val("pelaksana")}, "POST");
-  if(r.ok){ toast("Tindakan ditambahkan"); render(); }
+  if(r.ok){ toast("Tindakan ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan tindakan"); }
 }
 
 async function pageBilling(el){
