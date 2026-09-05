@@ -124,6 +124,7 @@
 .badge-Kuning { background:#e0a800; }
 .badge-Hijau { background:#27ae60; }
 .badge-Hitam { background:#2c3e50; }
+.badge-Biru { background:#2980b9; }
 .igd-card { border-radius:8px; padding:10px 14px; margin-bottom:8px; cursor:pointer; }
 .igd-card:hover { filter:brightness(0.97); }
 .vital-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
@@ -180,6 +181,8 @@ const NAV = [
   {id:"aturanba", label:"📋 Aturan BA 2024", step:null},
 {id:"penunjang", label:"🧪 Unit Penunjang", step:null},
 {id:"tarif", label:"💰 Master Tarif", step:null},
+{id:"ikp", label:"⚠️ Lapor Insiden (IKP)", step:null},
+{id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -205,7 +208,7 @@ const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal"], rekammedis:["rekammedis","cppt","asesmenawal"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"],
-  tarif:["tarif"]
+  tarif:["tarif"], mutu:["dashboardmutu"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -225,6 +228,7 @@ const DAFTAR_MODUL = [
   {id:"cssd", label:"Unit Penunjang — CSSD"},
   {id:"linen", label:"Unit Penunjang — Linen"},
   {id:"tarif", label:"Master Tarif"},
+  {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -239,7 +243,10 @@ function navAllowed(){
   const daftarLegacy = ROLE_ACCESS[role] || [];
   const modul = state.user.modul || [];
   const daftarModul = modul.flatMap(m => MODUL_KE_NAV[m] || []);
-  return Array.from(new Set(["dashboard", ...daftarLegacy, ...daftarModul]));
+  // "ikp" (Lapor Insiden Keselamatan Pasien) sengaja dibuka untuk SEMUA staf
+  // yang login, bukan lewat modul — budaya pelaporan insiden tanpa-menyalahkan
+  // hanya berjalan kalau semua orang bisa melapor, bukan hanya yang dicentang.
+  return Array.from(new Set(["dashboard", "ikp", ...daftarLegacy, ...daftarModul]));
 }
 
 function renderNav(){
@@ -786,7 +793,8 @@ function render(){
   const pages = {
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
-    pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif
+    pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
+    ikp: pageIKP, dashboardmutu: pageDashboardMutu
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1202,11 +1210,16 @@ async function patientStrip(kunjunganId){
   // (wajib role sah + sesi 2FA, dan setiap klik tercatat di server).
   const bolehLihatNik = !DEMO_MODE && state.user && (["admin","rekam_medis","verifikator"].includes(state.user.role) || (state.user.modul||[]).includes("lihat_nik"));
   const nikBaris = p.id ? `NIK: ****${p.nik4||p.NIK4||"----"}${bolehLihatNik ? ` <button class="btn sm ghost" onclick="lihatNikLengkap('${p.id}')">Lihat NIK Lengkap</button>` : ""}` : "";
+  const kategoriJatuh = d.asesmenAwal && d.asesmenAwal.kategoriJatuh;
+  const jatuhBadgeClass = kategoriJatuh==="Tinggi" ? "danger" : (kategoriJatuh==="Sedang" ? "warn" : "ok");
+  const jatuhBaris = kategoriJatuh ? `<div>⚠️ Risiko Jatuh: <span class="badge ${jatuhBadgeClass}">${kategoriJatuh}</span></div>` : "";
   return `<div class="patient-strip">
     <div><b>${p.nama||p.Nama||"-"}</b> · RM ${p.RM||"-"}</div>
     <div>${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}</div>
     <div>DPJP: ${d.kunjungan.dpjp||d.kunjungan.DPJP||"-"}</div>
     <div>Kunjungan: ${kunjunganId}</div>
+    ${p.alergi||p.Alergi ? `<div>🚫 Alergi: <b>${p.alergi||p.Alergi}</b></div>` : ""}
+    ${jatuhBaris}
     ${nikBaris ? `<div>${nikBaris}</div>` : ""}
   </div>`;
 }
@@ -1231,6 +1244,7 @@ async function pageAsesmenAwal(el){
   const d = window.__detail;
   const a = d.asesmenAwal || {};
   const terkunci = (d.kunjungan.Status || d.kunjungan.status) === "Selesai";
+  const jkBadgeClass = a.kategoriJatuh==="Tinggi" ? "danger" : (a.kategoriJatuh==="Sedang" ? "warn" : "ok");
   el.innerHTML += `<div class="card">
     ${terkunci ? `<div class="flag-item warn">🔒 Kunjungan ini sudah diproses pulang — Asesmen Awal terkunci, tidak bisa diubah lagi.</div>` : ""}
     ${a.namaPengisi ? `<p class="hint">Terakhir diisi/diperbarui oleh <b>${a.namaPengisi}</b> (${a.profesiPengisi||"-"}), ${new Date(a.waktuDiperbarui||a.waktuDiisi).toLocaleString('id-ID')}.</p>` : `<p class="hint">Belum pernah diisi untuk kunjungan ini.</p>`}
@@ -1245,6 +1259,32 @@ async function pageAsesmenAwal(el){
     <label>Pemeriksaan Fisik</label>
     <textarea id="aaFisik" ${terkunci?"disabled":""} placeholder="cth: KU lemas, TD 100/70, N 100x, S 37.8">${(a.pemeriksaanFisik||"").replace(/</g,"&lt;")}</textarea>
     ${terkunci ? "" : `<button class="btn" style="margin-top:10px" onclick="submitAsesmenAwal()">Simpan Asesmen Awal</button>`}
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="section-title">Skrining Risiko Jatuh (Skala Jatuh Morse)</div>
+    <p class="hint">Sesuai Sasaran Keselamatan Pasien 6 (Pengurangan Risiko Jatuh). Dihitung otomatis oleh sistem — centang/pilih sesuai kondisi pasien saat ini.</p>
+    ${a.skorJatuh!=null ? `<div class="flag-item" style="margin-bottom:8px"><span class="badge ${jkBadgeClass}">Skor ${a.skorJatuh} — Risiko ${a.kategoriJatuh}</span></div>` : ""}
+    <label><input type="checkbox" id="mfRiwayatJatuh" ${terkunci?"disabled":""} ${a.morseRiwayatJatuh?"checked":""}> Riwayat jatuh dalam 3 bulan terakhir (+25)</label>
+    <label style="margin-top:8px"><input type="checkbox" id="mfDiagnosisSekunder" ${terkunci?"disabled":""} ${a.morseDiagnosisSekunder?"checked":""}> Memiliki diagnosis sekunder / lebih dari satu diagnosis medis (+15)</label>
+    <label style="margin-top:8px">Alat Bantu Jalan</label>
+    <select id="mfAlatBantu" ${terkunci?"disabled":""}>
+      <option value="tidak_ada" ${a.morseAlatBantu==="tidak_ada"?"selected":""}>Tidak ada / bed rest / dibantu perawat (+0)</option>
+      <option value="kruk_tongkat_walker" ${a.morseAlatBantu==="kruk_tongkat_walker"?"selected":""}>Kruk, tongkat, atau walker (+15)</option>
+      <option value="berpegangan_furnitur" ${a.morseAlatBantu==="berpegangan_furnitur"?"selected":""}>Berpegangan pada perabot/furnitur (+30)</option>
+    </select>
+    <label style="margin-top:8px"><input type="checkbox" id="mfTerapiIv" ${terkunci?"disabled":""} ${a.morseTerapiIv?"checked":""}> Terpasang infus / terapi heparin lock (+20)</label>
+    <label style="margin-top:8px">Gaya Berjalan</label>
+    <select id="mfGayaBerjalan" ${terkunci?"disabled":""}>
+      <option value="normal" ${a.morseGayaBerjalan==="normal"?"selected":""}>Normal / bed rest / kursi roda (+0)</option>
+      <option value="lemah" ${a.morseGayaBerjalan==="lemah"?"selected":""}>Lemah (+10)</option>
+      <option value="terganggu" ${a.morseGayaBerjalan==="terganggu"?"selected":""}>Terganggu/sempoyongan (+20)</option>
+    </select>
+    <label style="margin-top:8px">Status Mental</label>
+    <select id="mfStatusMental" ${terkunci?"disabled":""}>
+      <option value="normal" ${a.morseStatusMental==="normal"?"selected":""}>Menyadari kemampuan diri sendiri (+0)</option>
+      <option value="lupa_keterbatasan" ${a.morseStatusMental==="lupa_keterbatasan"?"selected":""}>Sering lupa keterbatasan diri (+15)</option>
+    </select>
+    ${terkunci ? "" : `<button class="btn" style="margin-top:10px" onclick="submitAsesmenAwal()">Simpan Asesmen Awal &amp; Skrining Jatuh</button>`}
   </div>`;
 }
 async function submitAsesmenAwal(){
@@ -1252,9 +1292,15 @@ async function submitAsesmenAwal(){
     kunjunganId: state.activeKunjunganId,
     riwayatPenyakitSekarang: val("aaSekarang"), riwayatPenyakitDahulu: val("aaDahulu"),
     riwayatPenyakitKeluarga: val("aaKeluarga"), riwayatAlergi: val("aaAlergi"),
-    pemeriksaanFisik: val("aaFisik")
+    pemeriksaanFisik: val("aaFisik"),
+    morseRiwayatJatuh: document.getElementById("mfRiwayatJatuh").checked,
+    morseDiagnosisSekunder: document.getElementById("mfDiagnosisSekunder").checked,
+    morseAlatBantu: val("mfAlatBantu"),
+    morseTerapiIv: document.getElementById("mfTerapiIv").checked,
+    morseGayaBerjalan: val("mfGayaBerjalan"),
+    morseStatusMental: val("mfStatusMental")
   }, "POST");
-  if(r.ok){ toast("Asesmen Awal disimpan"); render(); } else { toast(r.msg || "Gagal menyimpan Asesmen Awal"); }
+  if(r.ok){ toast(`Asesmen Awal disimpan — Skor Jatuh ${r.skorJatuh} (Risiko ${r.kategoriJatuh})`); render(); } else { toast(r.msg || "Gagal menyimpan Asesmen Awal"); }
 }
 
 async function pageRekamMedis(el){
@@ -1565,14 +1611,18 @@ async function muatRiwayatTandaVital(){
   const list = Array.isArray(data) ? data : [];
   if(!list.length){ box.innerHTML = `<div class="empty">Belum ada tanda vital tercatat</div>`; }
   else {
-    box.innerHTML = `<table><tr><th>Waktu</th><th>TD</th><th>Nadi</th><th>Suhu</th><th>Napas</th><th>SpO2</th><th>Nyeri</th><th>Kesadaran</th><th>Dicatat Oleh</th></tr>
-      ${list.map(v=>`<tr>
+    box.innerHTML = `<table><tr><th>Waktu</th><th>TD</th><th>Nadi</th><th>Suhu</th><th>Napas</th><th>SpO2</th><th>Nyeri</th><th>Kesadaran</th><th>EWS</th><th>Dicatat Oleh</th></tr>
+      ${list.map(v=>{
+        const ewsClass = v.ewsKategori==="Tinggi" ? "danger" : (v.ewsKategori==="Sedang" ? "warn" : (v.ewsKategori==="Rendah" ? "ok" : "muted"));
+        const ewsLabel = v.ewsKategori ? `${v.ewsSkor} — ${v.ewsKategori}` : "belum lengkap";
+        return `<tr>
         <td>${new Date(v.waktu).toLocaleString('id-ID')}</td>
         <td>${v.sistolik&&v.diastolik ? v.sistolik+"/"+v.diastolik : "-"}</td>
         <td>${v.nadi||"-"}</td><td>${v.suhu||"-"}</td><td>${v.pernapasan||"-"}</td><td>${v.saturasiOksigen||"-"}</td>
         <td>${v.skalaNyeri ?? "-"}</td><td>${v.kesadaran||"-"}</td>
+        <td><span class="badge ${ewsClass}">${ewsLabel}</span></td>
         <td>${v.namaPencatat||"-"} <span class="hint">(${v.profesiPencatat||"-"})</span></td>
-      </tr>`).join("")}
+      </tr>`;}).join("")}
     </table>`;
   }
   if(sel){
@@ -1607,7 +1657,7 @@ async function muatRiwayatCPPT(){
       </div>
       ${c.subjective ? `<div style="margin-top:6px"><b>S:</b> ${c.subjective}</div>` : ""}
       ${c.objective ? `<div style="margin-top:4px"><b>O:</b> ${c.objective}</div>` : ""}
-      ${c.tandaVital ? `<div class="hint" style="margin-top:2px">↳ Tanda vital: TD ${c.tandaVital.sistolik||"?"}/${c.tandaVital.diastolik||"?"}, Nadi ${c.tandaVital.nadi||"-"}, Suhu ${c.tandaVital.suhu||"-"}°C, Napas ${c.tandaVital.pernapasan||"-"}, SpO2 ${c.tandaVital.saturasiOksigen||"-"}%${c.tandaVital.kesadaran?(", Kesadaran "+c.tandaVital.kesadaran):""}</div>` : ""}
+      ${c.tandaVital ? `<div class="hint" style="margin-top:2px">↳ Tanda vital: TD ${c.tandaVital.sistolik||"?"}/${c.tandaVital.diastolik||"?"}, Nadi ${c.tandaVital.nadi||"-"}, Suhu ${c.tandaVital.suhu||"-"}°C, Napas ${c.tandaVital.pernapasan||"-"}, SpO2 ${c.tandaVital.saturasiOksigen||"-"}%${c.tandaVital.kesadaran?(", Kesadaran "+c.tandaVital.kesadaran):""}${c.tandaVital.ewsKategori?` <span class="badge ${c.tandaVital.ewsKategori==='Tinggi'?'danger':(c.tandaVital.ewsKategori==='Sedang'?'warn':'ok')}">EWS ${c.tandaVital.ewsSkor} — ${c.tandaVital.ewsKategori}</span>`:""}</div>` : ""}
       ${c.assessment ? `<div style="margin-top:4px"><b>A:</b> ${c.assessment}</div>` : ""}
       ${c.plan ? `<div style="margin-top:4px"><b>P:</b> ${c.plan}</div>` : ""}
     </div>`).join("");
@@ -1862,6 +1912,9 @@ async function renderPenunjangTab(tab){
           <input id="obatNamaBaru" placeholder="Nama obat" style="margin-top:6px">
           <div class="row" style="margin-top:6px"><input id="obatStokAwal" type="number" placeholder="Stok awal"><input id="obatStokMin" type="number" placeholder="Stok minimal"></div>
           <input id="obatSatuan" placeholder="Satuan (tablet/kapsul/botol)" style="margin-top:6px">
+          <label style="margin-top:8px"><input type="checkbox" id="obatHighAlert"> ⚠️ Obat High-Alert / perlu diwaspadai (SKP 3)</label>
+          <input id="obatKategoriHighAlert" placeholder="Kategori (cth: Elektrolit Pekat, Sitostatika, LASA)" style="margin-top:6px">
+          <input id="obatPasanganLasa" placeholder="Mirip/rupa-ucapan dengan obat (LASA), cth: mirip Hydralazine" style="margin-top:6px">
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahObatBaru()">Tambah Obat</button>
         </div>
         <div class="card">
@@ -1953,12 +2006,17 @@ async function isiHasilPemeriksaan(jenis, orderId){
 /* ===== Farmasi: master obat & verifikasi resep ===== */
 function pjTableObat(rows){
   if(!rows || !rows.length) return '<div class="empty">Belum ada obat di master</div>';
-  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th></tr>
-    ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}><td>${o.kode}</td><td>${o.namaObat}</td><td>${o.stok}</td><td>${o.stokMinimal}</td><td>${o.satuan||"-"}</td></tr>`).join("")}
+  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>High-Alert</th></tr>
+    ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}><td>${o.kode}</td><td>${o.namaObat}</td><td>${o.stok}</td><td>${o.stokMinimal}</td><td>${o.satuan||"-"}</td>
+      <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td></tr>`).join("")}
   </table>`;
 }
 async function submitTambahObatBaru(){
-  const r = await api('farmasi.tambahObatBaru', {kode:val('obatKodeBaru'), namaObat:val('obatNamaBaru'), stokAwal:Number(val('obatStokAwal'))||0, stokMinimal:Number(val('obatStokMin'))||0, satuan:val('obatSatuan')}, 'POST');
+  const r = await api('farmasi.tambahObatBaru', {
+    kode:val('obatKodeBaru'), namaObat:val('obatNamaBaru'), stokAwal:Number(val('obatStokAwal'))||0, stokMinimal:Number(val('obatStokMin'))||0, satuan:val('obatSatuan'),
+    isHighAlert: document.getElementById('obatHighAlert').checked,
+    kategoriHighAlert: val('obatKategoriHighAlert'), pasanganLasa: val('obatPasanganLasa')
+  }, 'POST');
   if(r.ok){ toast('Obat baru ditambahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menambah obat');
 }
 async function submitTambahStok(){
@@ -1972,22 +2030,29 @@ function renderResepList(rows, bolehKelola){
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.namaPasien}</b> — ${r.noRm} <span class="hint">(${r.dokter||"-"})</span></div>
+        <div><b>${r.namaPasien}</b> — ${r.noRm} <span class="hint">(${r.dokter||"-"})</span> ${r.adaObatHighAlert?'<span class="badge danger">⚠️ Mengandung High-Alert</span>':''}</div>
         <span class="badge ${r.status==='Diserahkan'?'ok':(r.status==='Ditolak'?'danger':'muted')}">${r.status}</span>
       </div>
       <table style="margin-top:6px"><tr><th>Obat</th><th>Jumlah</th><th>Aturan Pakai</th><th>Stok Tersedia</th></tr>
-        ${(r.items||[]).map(i=>`<tr><td>${i.namaObat||i.kodeObat}</td><td>${i.jumlah}${i.satuan?(" "+i.satuan):""}</td><td>${i.aturanPakai||"-"}</td><td style="${(i.stokTersedia==null||i.stokTersedia<i.jumlah)?'color:var(--red)':''}">${i.stokTersedia ?? "tidak ada di master"}</td></tr>`).join("")}
+        ${(r.items||[]).map(i=>`<tr><td>${i.namaObat||i.kodeObat}${i.isHighAlert?' <span class="badge danger">High-Alert</span>':''}${i.pasanganLasa?`<div class="hint">LASA — mirip: ${i.pasanganLasa}</div>`:''}</td><td>${i.jumlah}${i.satuan?(" "+i.satuan):""}</td><td>${i.aturanPakai||"-"}</td><td style="${(i.stokTersedia==null||i.stokTersedia<i.jumlah)?'color:var(--red)':''}">${i.stokTersedia ?? "tidak ada di master"}</td></tr>`).join("")}
       </table>
       ${(r.status==='Diproses' && bolehKelola) ? `
+        ${r.adaObatHighAlert ? `<input id="verKedua_${r.id}" placeholder="Nama petugas KEDUA yang ikut memverifikasi (wajib, obat High-Alert)" style="margin-top:8px">` : ""}
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn sm" onclick="serahkanResep('${r.id}')">✅ Verifikasi &amp; Serahkan</button>
+          <button class="btn sm" onclick="serahkanResep('${r.id}', ${r.adaObatHighAlert?'true':'false'})">✅ Verifikasi &amp; Serahkan</button>
           <button class="btn sm ghost" onclick="tolakResep('${r.id}')">❌ Tolak</button>
         </div>` : ""}
-      ${r.namaApoteker ? `<div class="hint" style="margin-top:6px">Diproses oleh ${r.namaApoteker} (${r.profesiApoteker||"-"}), ${new Date(r.waktuDiserahkan).toLocaleString('id-ID')}${r.catatanApoteker?(" — "+r.catatanApoteker):""}</div>` : ""}
+      ${r.namaApoteker ? `<div class="hint" style="margin-top:6px">Diproses oleh ${r.namaApoteker} (${r.profesiApoteker||"-"}), ${new Date(r.waktuDiserahkan).toLocaleString('id-ID')}${r.catatanApoteker?(" — "+r.catatanApoteker):""}${r.namaVerifikatorKedua?(" — Verifikator kedua: "+r.namaVerifikatorKedua):""}</div>` : ""}
     </div>`).join("");
 }
-async function serahkanResep(id){
-  const r = await api('farmasi.serahkanResep', {resepId:id}, 'POST');
+async function serahkanResep(id, adaHighAlert){
+  const payload = {resepId:id};
+  if(adaHighAlert){
+    const verifikatorKedua = val('verKedua_'+id);
+    if(!verifikatorKedua){ toast('Resep ini mengandung obat High-Alert — isi nama petugas kedua dulu'); return; }
+    payload.verifikatorKedua = verifikatorKedua;
+  }
+  const r = await api('farmasi.serahkanResep', payload, 'POST');
   if(r.ok){ toast(r.msg || 'Resep diserahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyerahkan resep');
 }
 async function tolakResep(id){
@@ -1996,6 +2061,125 @@ async function tolakResep(id){
   if(!alasan.trim()){ toast('Alasan penolakan wajib diisi'); return; }
   const r = await api('farmasi.tolakResep', {resepId:id, alasan}, 'POST');
   if(r.ok){ toast('Resep ditolak'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menolak resep');
+}
+
+/* ================== PELAPORAN INSIDEN KESELAMATAN PASIEN (IKP) ==================
+   Sesuai Permenkes 11/2017 — SEMUA staf yang login boleh melapor (budaya
+   tanpa-menyalahkan). Membaca daftar laporan & mengubah status hanya untuk
+   admin/modul "mutu" (atau pelapornya sendiri, untuk laporannya sendiri saja
+   — diatur oleh RLS di server, bukan di sini). */
+async function pageIKP(el){
+  const bolehKelola = state.user.role === "admin" || (state.user.modul||[]).includes("mutu");
+  el.innerHTML = `<h1>Lapor Insiden Keselamatan Pasien (IKP)</h1>
+    <p class="sub">Laporkan KNC (nyaris cedera), KTC (tidak cedera), KTD (tidak diharapkan/cedera), KPC (potensial cedera), atau Sentinel Event. Tidak untuk menyalahkan siapa pun — laporan ini membantu RS mencegah kejadian serupa terulang. Setiap staf yang login boleh melapor.</p>
+    <div class="card">
+      <div class="section-title">Form Laporan Baru</div>
+      <label>Jenis Insiden</label>
+      <select id="ikpJenis">
+        <option value="KNC">KNC — Kejadian Nyaris Cedera (nearly happened, tertangkap sebelum sampai ke pasien)</option>
+        <option value="KTC">KTC — Kejadian Tidak Cedera (sampai ke pasien, tapi tidak menimbulkan cedera)</option>
+        <option value="KTD">KTD — Kejadian Tidak Diharapkan (menimbulkan cedera/kerugian pada pasien)</option>
+        <option value="KPC">KPC — Kejadian Potensial Cedera (kondisi berisiko, belum ada insiden nyata)</option>
+        <option value="Sentinel">Sentinel Event — kematian/cedera serius yang tidak berkaitan dengan perjalanan penyakit</option>
+      </select>
+      <label>Tanggal &amp; Waktu Kejadian</label>
+      <input id="ikpTanggal" type="datetime-local">
+      <label>Lokasi Kejadian</label>
+      <input id="ikpLokasi" placeholder="cth: Ruang Rawat Inap Melati, Kamar Obat Farmasi">
+      <label>No. RM Pasien Terkait (kalau ada)</label>
+      <input id="ikpNoRm" placeholder="Boleh dikosongkan kalau tidak terkait pasien tertentu">
+      <label>Nama Pasien Terkait (kalau ada)</label>
+      <input id="ikpNamaPasien">
+      <label>Kronologi Kejadian</label>
+      <textarea id="ikpKronologi" placeholder="Ceritakan urutan kejadian apa adanya"></textarea>
+      <label>Dampak pada Pasien (kalau ada)</label>
+      <textarea id="ikpDampak" placeholder="cth: Tidak ada / lecet ringan / dst"></textarea>
+      <label>Grading Risiko (perkiraan awal, boleh diperbarui tim Mutu)</label>
+      <select id="ikpGrading">
+        <option value="">-- Belum tahu, biar dinilai tim Mutu --</option>
+        <option value="Biru">Biru — risiko rendah</option>
+        <option value="Hijau">Hijau — risiko rendah-sedang</option>
+        <option value="Kuning">Kuning — risiko sedang-tinggi</option>
+        <option value="Merah">Merah — risiko tinggi/ekstrem</option>
+      </select>
+      <label>Tindakan Segera yang Sudah Dilakukan</label>
+      <textarea id="ikpTindakanSegera" placeholder="cth: Pasien diobservasi, DPJP sudah dihubungi"></textarea>
+      <button class="btn" style="margin-top:10px" onclick="submitLaporIKP()">Kirim Laporan</button>
+    </div>
+    <div class="section-title" style="margin-top:20px">${bolehKelola ? "Semua Laporan Insiden" : "Laporan Saya"}</div>
+    <div id="ikpList">Memuat...</div>`;
+  document.getElementById("ikpTanggal").value = new Date().toISOString().slice(0,16);
+  await muatDaftarIKP(bolehKelola);
+}
+async function submitLaporIKP(){
+  const tgl = val("ikpTanggal");
+  if(!tgl){ toast("Tanggal & waktu kejadian wajib diisi"); return; }
+  if(!val("ikpLokasi")){ toast("Lokasi kejadian wajib diisi"); return; }
+  if(!val("ikpKronologi")){ toast("Kronologi kejadian wajib diisi"); return; }
+  const r = await api("ikp.lapor", {
+    jenisInsiden: val("ikpJenis"), tanggalKejadian: new Date(tgl).toISOString(),
+    lokasi: val("ikpLokasi"), noRmTerkait: val("ikpNoRm"), namaPasienTerkait: val("ikpNamaPasien"),
+    kronologi: val("ikpKronologi"), dampakPadaPasien: val("ikpDampak"),
+    grading: val("ikpGrading"), tindakanSegera: val("ikpTindakanSegera"),
+    kunjunganId: state.activeKunjunganId || undefined
+  }, "POST");
+  if(r.ok){ toast(r.msg || "Laporan terkirim"); goTo("ikp"); } else toast(r.msg || "Gagal mengirim laporan");
+}
+async function muatDaftarIKP(bolehKelola){
+  const box = document.getElementById("ikpList");
+  const list = await api("ikp.daftar", {}, "GET");
+  if(!Array.isArray(list) || !list.length){ box.innerHTML = `<div class="empty">Belum ada laporan.</div>`; return; }
+  const gradingBadge = { Biru:"badge-Biru", Hijau:"badge-Hijau", Kuning:"badge-Kuning", Merah:"badge-Merah" };
+  box.innerHTML = list.map(i => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${i.jenisInsiden}</b> — ${i.lokasi} <span class="hint">(${new Date(i.tanggalKejadian).toLocaleString('id-ID')})</span></div>
+        <div>
+          ${i.grading ? `<span class="badge ${gradingBadge[i.grading]||'muted'}" style="color:#fff">${i.grading}</span>` : ""}
+          <span class="badge ${i.status==='Selesai'?'ok':(i.status==='Diinvestigasi'?'warn':'muted')}">${i.status}</span>
+        </div>
+      </div>
+      <div style="margin-top:6px">${i.kronologi}</div>
+      ${i.namaPasienTerkait ? `<div class="hint" style="margin-top:4px">Pasien terkait: ${i.namaPasienTerkait} (${i.noRmTerkait||"-"})</div>` : ""}
+      ${i.dampakPadaPasien ? `<div class="hint">Dampak: ${i.dampakPadaPasien}</div>` : ""}
+      ${i.tindakanSegera ? `<div class="hint">Tindakan segera: ${i.tindakanSegera}</div>` : ""}
+      <div class="hint" style="margin-top:4px">Dilaporkan oleh ${i.namaPelapor||"-"} (${i.profesiPelapor||"-"})</div>
+      ${i.tindakLanjut ? `<div style="margin-top:4px"><b>Tindak Lanjut:</b> ${i.tindakLanjut}</div>` : ""}
+      ${bolehKelola && i.status !== 'Selesai' ? `
+        <div style="margin-top:8px">
+          <textarea id="tl_${i.id}" placeholder="Tindak lanjut / investigasi..."></textarea>
+          <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn sm ghost" onclick="ubahStatusIKP('${i.id}','Diinvestigasi')">Tandai Diinvestigasi</button>
+            <button class="btn sm" onclick="ubahStatusIKP('${i.id}','Selesai')">Tandai Selesai</button>
+          </div>
+        </div>` : ""}
+    </div>`).join("");
+}
+async function ubahStatusIKP(id, status){
+  const r = await api("ikp.updateStatus", {id, status, tindakLanjut: val("tl_"+id)}, "POST");
+  if(r.ok){ toast("Status diperbarui"); goTo("ikp"); } else toast(r.msg || "Gagal mengubah status");
+}
+
+/* ================== DASHBOARD INDIKATOR MUTU ================== */
+async function pageDashboardMutu(el){
+  el.innerHTML = `<h1>Dashboard Indikator Mutu</h1><p class="sub">Ringkasan indikator mutu &amp; keselamatan pasien untuk manajemen — sesuai Standar Akreditasi Rumah Sakit terbaru.</p><div id="dmBody">Memuat...</div>`;
+  const r = await api("getDashboardMutu", {}, "GET");
+  const box = document.getElementById("dmBody");
+  if(!r.ok){ box.innerHTML = `<div class="card empty">${r.msg || "Gagal memuat dashboard"}</div>`; return; }
+  const insiden = r.insidenPerJenisBulanIni || {};
+  box.innerHTML = `<div class="grid cols3">
+    <div class="card stat"><b>${r.totalKunjunganBulanIni ?? 0}</b><span>Total Kunjungan Bulan Ini</span></div>
+    <div class="card stat"><b>${r.rataLosHariBulanIni ?? "-"}</b><span>Rata-rata LOS (hari), pasien pulang bulan ini</span></div>
+    <div class="card stat"><b>${r.kelengkapanAsesmenAwalAktifPersen ?? 0}%</b><span>Kelengkapan Asesmen Awal (kunjungan aktif)</span></div>
+    <div class="card stat" style="border-color:${(r.pasienRisikoJatuhTinggiAktif||0)>0?'var(--red)':''}"><b style="color:${(r.pasienRisikoJatuhTinggiAktif||0)>0?'var(--red)':''}">${r.pasienRisikoJatuhTinggiAktif ?? 0}</b><span>Pasien Aktif dengan Risiko Jatuh Tinggi</span></div>
+    <div class="card stat" style="border-color:${(r.ewsTinggi24JamTerakhir||0)>0?'var(--red)':''}"><b style="color:${(r.ewsTinggi24JamTerakhir||0)>0?'var(--red)':''}">${r.ewsTinggi24JamTerakhir ?? 0}</b><span>Pembacaan EWS "Tinggi" 24 Jam Terakhir</span></div>
+    <div class="card stat"><b>${r.resepHighAlertBulanIni ?? 0}</b><span>Resep Mengandung Obat High-Alert Bulan Ini</span></div>
+  </div>
+  <div class="section-title" style="margin-top:16px">Insiden Keselamatan Pasien Bulan Ini</div>
+  <div class="grid cols3">
+    ${['KNC','KTC','KTD','KPC','Sentinel'].map(j=>`<div class="card stat"><b>${insiden[j]||0}</b><span>${j}</span></div>`).join("")}
+  </div>
+  <p class="hint" style="margin-top:12px">💡 Lihat detail tiap laporan insiden di menu "⚠️ Lapor Insiden (IKP)".</p>`;
 }
 
 /* ================== MASTER TARIF ================== */
