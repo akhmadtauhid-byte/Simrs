@@ -1323,11 +1323,65 @@ async function simpanDiagnosaMedisDokter(){
 // buatan/AI — tetap wajib dicek ulang oleh dokter/petugas rekam medis sebelum
 // disimpan, terutama untuk kalimat yang punya banyak istilah umum.
 const STOPWORD_DIAGNOSA = new Set(["dan","dengan","dgn","di","ke","dari","pada","yang","atau","tanpa","tidak","ada","akibat","karena","et","causa","suspek","susp","serta","untuk","akan","juga","sudah","belum","masih","oleh","sejak","disertai","tampak","terdapat","adalah","merupakan","suatu","beberapa","seperti","berupa","ringan","sedang","berat","kronis","akut"]);
+// Deskripsi resmi ICD-10/ICD-9-CM di database ini berbahasa Inggris/Latin
+// (standar WHO), sedangkan dokter biasanya menulis dalam Bahasa Indonesia.
+// Kamus kecil ini menerjemahkan istilah Indonesia yang umum dipakai jadi
+// padanan Inggris/Latin-nya, supaya ikut dicari juga — bukan kamus lengkap,
+// hanya istilah yang sering muncul di layanan rumah sakit tipe C sehari-hari.
+// Kalau suatu istilah tidak ada di sini, tetap bisa dicari manual di kotak
+// "Cari Kode / Deskripsi" dengan kata Inggris/Latin-nya.
+const KAMUS_ISTILAH_MEDIS = {
+  "diare":["diarrhoea","diarrhea"], "mencret":["diarrhoea","diarrhea"],
+  "muntah":["vomit"], "demam":["fever","febrile"],
+  "batuk":["cough"], "pilek":["coryza","rhinitis"],
+  "sesak napas":["dyspnoea","dyspnea"], "sesak":["dyspnoea","dyspnea"],
+  "nyeri":["pain"], "patah tulang":["fracture"], "patah":["fracture"],
+  "luka bakar":["burn"], "luka":["wound","injury"],
+  "infeksi saluran kemih":["urinary tract infection"], "infeksi":["infection"],
+  "radang paru":["pneumonia"], "paru paru basah":["pneumonia"],
+  "radang usus":["enteritis"], "radang tenggorokan":["pharyngitis"],
+  "radang telinga":["otitis"], "radang":["inflammation"],
+  "darah tinggi":["hypertension","hypertensive"], "hipertensi":["hypertension","hypertensive"],
+  "gagal jantung":["heart failure","cardiac failure"], "jantung":["heart","cardiac"],
+  "stroke":["stroke","cerebrovascular"], "kejang":["seizure","convulsion"],
+  "dehidrasi":["dehydration"], "kurang darah":["anaemia","anemia"], "anemia":["anaemia","anemia"],
+  "asma":["asthma"], "tbc":["tuberculosis"], "tb paru":["tuberculosis"], "tipes":["typhoid"], "tifoid":["typhoid"],
+  "usus buntu":["appendicitis"], "apendisitis":["appendicitis"],
+  "batu ginjal":["renal calculus","kidney stone","urolithiasis"],
+  "gagal ginjal":["renal failure","kidney failure"],
+  "hamil":["pregnancy","pregnant"], "persalinan":["delivery","labour","labor"],
+  "keguguran":["abortion","miscarriage"], "katarak":["cataract"],
+  "tumor":["tumour","tumor","neoplasm"], "kanker":["cancer","malignant","malignancy"],
+  "alergi":["allergy","allergic"], "keracunan":["poisoning"],
+  "cedera":["injury","trauma"], "kecelakaan":["accident"],
+  "pendarahan":["haemorrhage","hemorrhage","bleeding"], "perdarahan":["haemorrhage","hemorrhage","bleeding"],
+  "demam berdarah":["dengue"], "dbd":["dengue"], "campak":["measles"],
+  "cacar":["varicella","chickenpox","smallpox"], "gondongan":["mumps"],
+  "kencing manis":["diabetes mellitus","diabetes"], "diabetes":["diabetes"],
+  "vertigo":["vertigo"], "migrain":["migraine"], "epilepsi":["epilepsy"],
+  "lumpuh":["paralysis","palsy"], "buta":["blind","blindness"], "tuli":["deaf","deafness"],
+  "sakit gigi":["dental","tooth"], "sembelit":["constipation"], "susah bab":["constipation"],
+  "wasir":["haemorrhoid","hemorrhoid"], "ambeien":["haemorrhoid","hemorrhoid"],
+  "hernia":["hernia"], "gagal napas":["respiratory failure"],
+  "syok":["shock"], "koma":["coma"], "sepsis":["sepsis"],
+  "keseleo":["sprain"], "dislokasi":["dislocation"],
+  "rematik":["rheumatism","rheumatoid"], "asam urat":["gout"],
+  "kolesterol":["cholesterol"], "kegemukan":["obesity"], "obesitas":["obesity"],
+  "gizi buruk":["malnutrition"], "kuning":["jaundice"], "sakit kuning":["jaundice"],
+  "hepatitis":["hepatitis"], "sirosis":["cirrhosis"], "gastritis":["gastritis"], "maag":["gastritis","dyspepsia"],
+  "ispa":["respiratory infection","upper respiratory"], "isk":["urinary tract infection"]
+};
 function ambilKataKunciDiagnosa(teks){
-  return Array.from(new Set(
-    teks.toLowerCase().replace(/[^a-z0-9\s-]/g," ").split(/\s+/)
-      .filter(w => w.length >= 4 && !STOPWORD_DIAGNOSA.has(w))
-  )).slice(0, 6); // maksimal 6 kata kunci supaya tidak terlalu banyak permintaan ke server
+  const teksLower = teks.toLowerCase();
+  const kataDasar = teksLower.replace(/[^a-z0-9\s-]/g," ").split(/\s+/)
+    .filter(w => w.length >= 4 && !STOPWORD_DIAGNOSA.has(w));
+  const kataKamus = [];
+  Object.keys(KAMUS_ISTILAH_MEDIS).forEach(frasa=>{
+    if(teksLower.includes(frasa)) kataKamus.push(...KAMUS_ISTILAH_MEDIS[frasa]);
+  });
+  // maksimal 10 kata kunci (gabungan kata asli + padanan dari kamus) supaya
+  // tidak terlalu banyak permintaan ke server
+  return Array.from(new Set([...kataDasar, ...kataKamus])).slice(0, 10);
 }
 async function kumpulkanSaranKode(kataKunci, searchFn){
   const skor = {};
