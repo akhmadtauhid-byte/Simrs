@@ -161,7 +161,8 @@ let state = {
   page: "dashboard",
   activeKunjunganId: null,
   local: DEMO_MODE ? seedLocalDemo() : null,
-  user: null // {nama, role} — diisi setelah login
+  user: null, // {nama, role} — diisi setelah login
+  pegawaiCache: null // daftar pegawai (utk dropdown Pelaksana/DPJP), diisi sekali & dibersihkan saat ada perubahan
 };
 
 const NAV = [
@@ -251,6 +252,8 @@ function renderNav(){
     ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br>
       ${DEMO_MODE ? "" : `<button onclick="mulaiSetup2FA()">🔒 Aktifkan 2FA</button>`}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaHakAkses()">🗂️ Kelola Hak Akses</button>` : ""}
+      ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaPegawai()">👥 Kelola Pegawai</button>` : ""}
+      ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageRekapPegawai()">📊 Rekap Pegawai</button>` : ""}
       <button onclick="logout()">Keluar</button>`;
   }
 }
@@ -258,7 +261,7 @@ function goTo(page){
   if(!navAllowed().includes(page)){ toast("Menu ini tidak tersedia untuk role Anda"); return; }
   state.page = page; render();
 }
-function logout(){ if(!DEMO_MODE) supabase.auth.signOut(); state.user = null; render(); }
+function logout(){ if(!DEMO_MODE) supabase.auth.signOut(); state.user = null; state.pegawaiCache = null; render(); }
 function toast(msg){
   const t = document.getElementById("toast");
   t.textContent = msg; t.classList.add("show");
@@ -420,6 +423,129 @@ async function simpanModul(profileId){
   const r = await api("kelolaStaf.setModul", {profileId, modulList}, "POST");
   toast(r.ok ? "Hak akses disimpan — staf terkait perlu logout & login ulang supaya menu terbaru muncul" : (r.msg||"Gagal menyimpan hak akses"));
 }
+/* ============ MASTER PEGAWAI & REKAP (khusus admin untuk kelola/rekap; ============
+   semua staf login boleh membaca daftar pegawai untuk mengisi dropdown Pelaksana/DPJP) */
+
+// Ambil daftar pegawai aktif (untuk dropdown), disimpan sementara di memori
+// supaya tidak perlu hubungi server tiap kali form dibuka. Panggil dengan
+// force=true (atau set state.pegawaiCache=null) setelah ada perubahan data pegawai.
+async function getPegawaiCache(force){
+  if(state.pegawaiCache && !force) return state.pegawaiCache;
+  if(DEMO_MODE){ state.pegawaiCache = []; return state.pegawaiCache; }
+  const r = await api("getPegawaiList", {}, "GET");
+  state.pegawaiCache = Array.isArray(r) ? r : [];
+  return state.pegawaiCache;
+}
+
+// Isi <select> dropdown pegawai (Pelaksana/DPJP) dengan daftar pegawai +
+// satu pilihan "ketik manual" untuk nama yang belum ada di master pegawai.
+async function isiSelectPegawai(selectId){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const list = await getPegawaiCache();
+  sel.innerHTML = `<option value="">-- Pilih dari daftar pegawai --</option>` +
+    list.map(p=>`<option value="${p.id}">${(p.nama||"").replace(/</g,"&lt;")}${p.jabatan?(" — "+(p.jabatan||"").replace(/</g,"&lt;")):""}</option>`).join("") +
+    `<option value="__manual__">✍️ Lainnya (belum ada di daftar pegawai, ketik manual)</option>`;
+}
+// Munculkan/sembunyikan kotak isian manual saat pilihan "Lainnya" dipilih.
+function onPegawaiSelectChange(selectId, manualId){
+  const sel = document.getElementById(selectId);
+  const manual = document.getElementById(manualId);
+  if(!sel || !manual) return;
+  manual.style.display = sel.value === "__manual__" ? "block" : "none";
+}
+// Ambil hasil pilihan pegawai (id dari master, ATAU nama teks manual) untuk dikirim ke server.
+function pegawaiPayload(selectId, manualId){
+  const sel = document.getElementById(selectId);
+  const manual = document.getElementById(manualId);
+  if(!sel) return {id:"", nama:""};
+  if(sel.value === "__manual__") return {id:"", nama: manual ? manual.value.trim() : ""};
+  if(sel.value) return {id: sel.value, nama:""};
+  return {id:"", nama:""};
+}
+
+async function pageKelolaPegawai(){
+  const m = document.getElementById("main");
+  m.innerHTML = `<h1>Kelola Pegawai</h1>
+    <p class="sub">Daftar induk nama pegawai — termasuk dokter/petugas yang <b>tidak perlu akun login SIMRS sama sekali</b>. Daftar ini dipakai sebagai pilihan "Pelaksana Tindakan" & "DPJP" di seluruh sistem, supaya jumlah tindakan tiap orang bisa dihitung otomatis & akurat lewat menu "Rekap Pegawai" (dasar hitung jasa medis/kinerja).</p>
+    <button class="btn ghost" style="margin-bottom:14px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title">Tambah Pegawai Baru</div>
+      <div class="row"><div><label>Nama Lengkap</label><input id="pegNamaBaru" placeholder="cth: dr. Ahmad Yani, Sp.PD"></div>
+        <div><label>Jabatan</label><input id="pegJabatanBaru" placeholder="cth: Dokter Spesialis Penyakit Dalam"></div></div>
+      <button class="btn" style="margin-top:10px" onclick="tambahPegawaiBaru()">Tambah Pegawai</button>
+    </div>
+    <div id="pegawaiBody" class="empty">Memuat...</div>`;
+  await muatKelolaPegawai();
+}
+async function muatKelolaPegawai(){
+  const body = document.getElementById("pegawaiBody");
+  const r = await api("kelolaPegawai.list", {}, "GET");
+  if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat data"}</div>`; return; }
+  if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada pegawai terdaftar.</div>`; return; }
+  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>Status</th><th></th></tr>
+    ${r.data.map(p => `<tr>
+      <td><input id="pn_${p.id}" value="${(p.nama||'').replace(/"/g,'&quot;')}" style="min-width:180px"></td>
+      <td><input id="pj_${p.id}" value="${(p.jabatan||'').replace(/"/g,'&quot;')}" style="min-width:160px"></td>
+      <td>${p.aktif ? '<span class="badge ok">Aktif</span>' : '<span class="badge danger">Nonaktif</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="simpanPegawai('${p.id}')">Simpan</button>
+        <button class="btn sm ${p.aktif?'danger':''}" onclick="setAktifPegawai('${p.id}', ${!p.aktif})">${p.aktif?'Nonaktifkan':'Aktifkan'}</button>
+      </td>
+    </tr>`).join("")}
+    </table>
+    <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem.</p>`;
+}
+async function tambahPegawaiBaru(){
+  const nama = val("pegNamaBaru");
+  if(!nama){ toast("Nama pegawai wajib diisi"); return; }
+  const r = await api("kelolaPegawai.simpan", {nama, jabatan: val("pegJabatanBaru")}, "POST");
+  if(r.ok){
+    document.getElementById("pegNamaBaru").value = "";
+    document.getElementById("pegJabatanBaru").value = "";
+    state.pegawaiCache = null;
+    toast("Pegawai ditambahkan");
+    await muatKelolaPegawai();
+  } else toast(r.msg || "Gagal menambah pegawai");
+}
+async function simpanPegawai(id){
+  const nama = document.getElementById("pn_"+id).value.trim();
+  const jabatan = document.getElementById("pj_"+id).value.trim();
+  const r = await api("kelolaPegawai.simpan", {id, nama, jabatan}, "POST");
+  state.pegawaiCache = null;
+  toast(r.ok ? "Data pegawai disimpan" : (r.msg || "Gagal menyimpan"));
+}
+async function setAktifPegawai(id, aktif){
+  const r = await api("kelolaPegawai.setAktif", {id, aktif}, "POST");
+  state.pegawaiCache = null;
+  toast(r.ok ? (aktif ? "Pegawai diaktifkan kembali" : "Pegawai dinonaktifkan") : (r.msg || "Gagal mengubah status"));
+  await muatKelolaPegawai();
+}
+
+async function pageRekapPegawai(){
+  const m = document.getElementById("main");
+  m.innerHTML = `<h1>Rekap Pegawai</h1>
+    <p class="sub">Jumlah tindakan yang dilakukan & jumlah menjadi DPJP (kunjungan rawat jalan/rawat inap) per pegawai — dasar hitung jasa medis/kinerja. Kosongkan tanggal untuk melihat total keseluruhan.</p>
+    <button class="btn ghost" style="margin-bottom:14px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
+    <div class="card" style="margin-bottom:16px">
+      <div class="row"><div><label>Dari Tanggal</label><input type="date" id="rekapDari"></div>
+        <div><label>Sampai Tanggal</label><input type="date" id="rekapSampai"></div>
+        <div style="flex:0 0 auto;align-self:flex-end"><button class="btn" onclick="muatRekapPegawai()">Tampilkan</button></div></div>
+    </div>
+    <div id="rekapPegawaiBody" class="empty">Memuat...</div>`;
+  await muatRekapPegawai();
+}
+async function muatRekapPegawai(){
+  const body = document.getElementById("rekapPegawaiBody");
+  body.innerHTML = `<div class="empty">Memuat...</div>`;
+  const r = await api("rekapPegawai", {dari: val("rekapDari"), sampai: val("rekapSampai")}, "POST");
+  if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat rekap"}</div>`; return; }
+  if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada data pegawai aktif.</div>`; return; }
+  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>Jumlah Tindakan</th><th>DPJP Kunjungan</th><th>DPJP Rawat Inap</th></tr>
+    ${r.data.map(x=>`<tr><td>${x.nama}</td><td>${x.jabatan||"-"}</td><td>${x.jumlahTindakan}</td><td>${x.jumlahDPJPKunjungan}</td><td>${x.jumlahDPJPRawatInap}</td></tr>`).join("")}
+    </table>`;
+}
+
 function rebuildAppShell(){
   document.getElementById("app").outerHTML = `<div id="app" class="app">
     <div class="side">
@@ -880,7 +1006,9 @@ async function pagePendaftaran(el){
         <div id="hasilCariPasien"></div>
         <div class="row"><div><label>Jenis Kunjungan</label><select id="jenisKunjungan"><option>Rawat Jalan</option><option>Rawat Inap</option><option>IGD</option></select></div>
           <div><label>Poli / Ruangan Tujuan</label><input id="poliRuangan" placeholder="cth: Poli Penyakit Dalam"></div></div>
-        <div class="row"><div><label>DPJP</label><input id="dpjp" placeholder="dr. ..."></div>
+        <div class="row"><div><label>DPJP</label>
+          <select id="dpjpId" onchange="onPegawaiSelectChange('dpjpId','dpjpManual')"><option value="">Memuat daftar pegawai...</option></select>
+          <input id="dpjpManual" style="display:none;margin-top:6px" placeholder="Ketik nama DPJP manual (kalau belum ada di daftar pegawai)"></div>
           <div><label>Petugas Pendaftaran</label><input id="petugas"></div></div>
         <label>Keluhan Utama</label><textarea id="keluhanUtama"></textarea>
         <div style="margin-top:12px"><button class="btn" onclick="submitKunjungan()">Buat Kunjungan</button></div>
@@ -888,6 +1016,7 @@ async function pagePendaftaran(el){
         <div id="areaRiwayatPasien"></div>
       </div>
     </div>`;
+  isiSelectPegawai("dpjpId");
 
   const dash = await api("getDashboardRegistrasiHariIni", {}, "GET");
   if (dash && dash.ok){
@@ -982,8 +1111,9 @@ async function lihatRiwayatSingkat(rm){
 async function submitKunjungan(){
   const rm = val("cariRM") || lastRM;
   if(!rm){ toast("Isi/cari No. RM dulu"); return; }
+  const dpjpPilih = pegawaiPayload("dpjpId","dpjpManual");
   const data = {rm, jenisKunjungan:val("jenisKunjungan"), poliRuangan:val("poliRuangan"),
-    dpjp:val("dpjp"), keluhanUtama:val("keluhanUtama"), petugas:val("petugas")};
+    dpjpId: dpjpPilih.id, dpjp: dpjpPilih.nama, keluhanUtama:val("keluhanUtama"), petugas:val("petugas")};
   const r = await api("registrasiPasienLamaLengkap", data, "POST");
   if(r.ok){
     document.getElementById("hasilKunjungan").innerHTML =
@@ -1100,7 +1230,10 @@ async function pageRekamMedis(el){
       ${d.rawatInap ? `<div class="hint">Sudah diadmisi: Ruangan ${d.rawatInap.ruangan||d.rawatInap.Ruangan}, Kelas ${d.rawatInap.kelas||d.rawatInap.Kelas}</div>` : `
       <div class="row"><div><label>Ruangan</label><input id="ruangan" placeholder="cth: Melati 2"></div>
         <div><label>Kelas Rawat</label><select id="kelas"><option value="1">Kelas 1</option><option value="2">Kelas 2</option><option value="3">Kelas 3</option></select></div></div>
-      <div class="row"><div><label>DPJP</label><input id="dpjpRI"></div><div><label>Cara Masuk</label><select id="caraMasuk"><option>Rujukan</option><option>IGD</option><option>Poliklinik</option></select></div></div>
+      <div class="row"><div><label>DPJP</label>
+        <select id="dpjpRIId" onchange="onPegawaiSelectChange('dpjpRIId','dpjpRIManual')"><option value="">Memuat daftar pegawai...</option></select>
+        <input id="dpjpRIManual" style="display:none;margin-top:6px" placeholder="Ketik nama DPJP manual (kalau belum ada di daftar pegawai)"></div>
+        <div><label>Cara Masuk</label><select id="caraMasuk"><option>Rujukan</option><option>IGD</option><option>Poliklinik</option></select></div></div>
       <button class="btn" style="margin-top:10px" onclick="submitAdmisi()">Admisi Pasien</button>`}
     </div>` : ""}
     <div class="card">
@@ -1121,7 +1254,9 @@ async function pageRekamMedis(el){
         <div id="saranICD9" class="suggest-box"></div>
       </div>
       <div class="row"><div><label>Kode ICD-9-CM (terpilih)</label><input id="kodeICD9" placeholder="cth: 99.29"></div>
-        <div><label>Pelaksana</label><input id="pelaksana"></div></div>
+        <div><label>Pelaksana</label>
+          <select id="pelaksanaId" onchange="onPegawaiSelectChange('pelaksanaId','pelaksanaManual')"><option value="">Memuat daftar pegawai...</option></select>
+          <input id="pelaksanaManual" style="display:none;margin-top:6px" placeholder="Ketik nama pelaksana manual (kalau belum ada di daftar pegawai)"></div></div>
       <label>Deskripsi Tindakan</label><input id="deskTindakan" placeholder="cth: Injeksi terapeutik">
       <button class="btn" style="margin-top:10px" onclick="submitTindakan()">Tambah Tindakan</button>
     </div>
@@ -1136,9 +1271,12 @@ async function pageRekamMedis(el){
   <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th></tr>
     ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada tindakan</div>`}</div>`;
+  isiSelectPegawai("dpjpRIId");
+  isiSelectPegawai("pelaksanaId");
 }
 async function submitAdmisi(){
-  const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjp:val("dpjpRI"), caraMasuk:val("caraMasuk")}, "POST");
+  const dpjpPilih = pegawaiPayload("dpjpRIId","dpjpRIManual");
+  const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjpId: dpjpPilih.id, dpjp: dpjpPilih.nama, caraMasuk:val("caraMasuk")}, "POST");
   if(r.ok){ toast("Pasien diadmisi rawat inap"); render(); }
 }
 async function submitDiagnosa(){
@@ -1146,7 +1284,8 @@ async function submitDiagnosa(){
   if(r.ok){ toast("Diagnosa ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan diagnosa"); }
 }
 async function submitTindakan(){
-  const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksana:val("pelaksana")}, "POST");
+  const pelPilih = pegawaiPayload("pelaksanaId","pelaksanaManual");
+  const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
   if(r.ok){ toast("Tindakan ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan tindakan"); }
 }
 
