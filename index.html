@@ -170,6 +170,7 @@ const NAV = [
   {id:"pendaftaran", label:"1. Pendaftaran", step:"1"},
   {id:"kunjungan", label:"2. Kunjungan Aktif", step:"2"},
   {id:"igd", label:"🚑 IGD", step:null},
+  {id:"asesmenawal", label:"🩺 Asesmen Awal", step:null},
   {id:"rekammedis", label:"3. Diagnosa & Tindakan", step:"3"},
   {id:"cppt", label:"📝 CPPT & Tanda Vital", step:null},
   {id:"billing", label:"4. Billing", step:"4"},
@@ -191,8 +192,8 @@ const ROLE_ACCESS = {
   // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
   // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
-  rekam_medis: ["dashboard","kunjungan","rekammedis","cppt","aturanba","igd"],
-  perawat: ["dashboard","kunjungan","rekammedis","cppt","aturanba","igd"],
+  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
+  perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
 };
@@ -201,7 +202,7 @@ verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penu
 // Akses". Satu modul bisa membuka lebih dari satu menu (mis. modul lab/rad/
 // farmasi/gizi/cssd/linen semuanya membuka menu "penunjang" yang sama).
 const MODUL_KE_NAV = {
-  pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt"], rekammedis:["rekammedis","cppt"],
+  pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal"], rekammedis:["rekammedis","cppt","asesmenawal"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"],
   tarif:["tarif"]
@@ -784,7 +785,7 @@ function render(){
   const m = document.getElementById("main");
   const pages = {
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
-    rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
+    asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
@@ -1218,6 +1219,44 @@ async function lihatNikLengkap(pasienId){
   }
 }
 
+/* ============ ASESMEN AWAL (riwayat penyakit, alergi, pemeriksaan fisik saat masuk) ============
+   Beda dengan CPPT: SATU dokumen per kunjungan, boleh disimpan ulang/diperbaiki
+   selama kunjungan masih berjalan — begitu pasien diproses pulang, server
+   otomatis mengunci dokumen ini (lihat fn_simpan_asesmen_awal di
+   lengkapi_rekam_medis.sql). */
+async function pageAsesmenAwal(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Asesmen Awal</h1><p class="sub">Riwayat penyakit sekarang/dahulu/keluarga, riwayat alergi, & pemeriksaan fisik saat pasien pertama kali diperiksa. Boleh disimpan ulang/diperbaiki selama kunjungan masih berjalan — otomatis terkunci begitu pasien diproses pulang.</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  const d = window.__detail;
+  const a = d.asesmenAwal || {};
+  const terkunci = (d.kunjungan.Status || d.kunjungan.status) === "Selesai";
+  el.innerHTML += `<div class="card">
+    ${terkunci ? `<div class="flag-item warn">🔒 Kunjungan ini sudah diproses pulang — Asesmen Awal terkunci, tidak bisa diubah lagi.</div>` : ""}
+    ${a.namaPengisi ? `<p class="hint">Terakhir diisi/diperbarui oleh <b>${a.namaPengisi}</b> (${a.profesiPengisi||"-"}), ${new Date(a.waktuDiperbarui||a.waktuDiisi).toLocaleString('id-ID')}.</p>` : `<p class="hint">Belum pernah diisi untuk kunjungan ini.</p>`}
+    <label>Riwayat Penyakit Sekarang</label>
+    <textarea id="aaSekarang" ${terkunci?"disabled":""} placeholder="cth: Diare 2 hari, 5x/hari, lendir(-), darah(-)">${(a.riwayatPenyakitSekarang||"").replace(/</g,"&lt;")}</textarea>
+    <label>Riwayat Penyakit Dahulu</label>
+    <textarea id="aaDahulu" ${terkunci?"disabled":""} placeholder="cth: Tidak ada / pernah dirawat karena...">${(a.riwayatPenyakitDahulu||"").replace(/</g,"&lt;")}</textarea>
+    <label>Riwayat Penyakit Keluarga</label>
+    <textarea id="aaKeluarga" ${terkunci?"disabled":""} placeholder="cth: Ibu memiliki riwayat darah tinggi">${(a.riwayatPenyakitKeluarga||"").replace(/</g,"&lt;")}</textarea>
+    <label>Riwayat Alergi</label>
+    <textarea id="aaAlergi" ${terkunci?"disabled":""} placeholder="cth: Alergi Penisilin, alergi udang">${(a.riwayatAlergi||"").replace(/</g,"&lt;")}</textarea>
+    <label>Pemeriksaan Fisik</label>
+    <textarea id="aaFisik" ${terkunci?"disabled":""} placeholder="cth: KU lemas, TD 100/70, N 100x, S 37.8">${(a.pemeriksaanFisik||"").replace(/</g,"&lt;")}</textarea>
+    ${terkunci ? "" : `<button class="btn" style="margin-top:10px" onclick="submitAsesmenAwal()">Simpan Asesmen Awal</button>`}
+  </div>`;
+}
+async function submitAsesmenAwal(){
+  const r = await api("simpanAsesmenAwal", {
+    kunjunganId: state.activeKunjunganId,
+    riwayatPenyakitSekarang: val("aaSekarang"), riwayatPenyakitDahulu: val("aaDahulu"),
+    riwayatPenyakitKeluarga: val("aaKeluarga"), riwayatAlergi: val("aaAlergi"),
+    pemeriksaanFisik: val("aaFisik")
+  }, "POST");
+  if(r.ok){ toast("Asesmen Awal disimpan"); render(); } else { toast(r.msg || "Gagal menyimpan Asesmen Awal"); }
+}
+
 async function pageRekamMedis(el){
   const strip = await patientStrip(state.activeKunjunganId);
   el.innerHTML = `<h1>Diagnosa & Tindakan</h1><p class="sub">Langkah 3 — input ICD-10 (diagnosa) & ICD-9-CM (tindakan). Untuk Rawat Inap, lengkapi admisi ruangan dulu.</p>${strip}`;
@@ -1292,9 +1331,47 @@ async function pageRekamMedis(el){
   <div class="section-title">Tindakan Tercatat</div>
   <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th></tr>
     ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td></tr>`).join("")}
-  </table>` : `<div class="empty">Belum ada tindakan</div>`}</div>`;
+  </table>` : `<div class="empty">Belum ada tindakan</div>`}</div>
+  <div class="section-title">Persetujuan Tindakan Kedokteran (Informed Consent)</div>
+  <div class="card">
+    <p class="hint">Dokumen bahwa pasien/wali sudah diberi penjelasan (indikasi, risiko, alternatif) sebelum sebuah tindakan dilakukan, lalu menyatakan Setuju atau Menolak. Sekali disimpan TIDAK BISA diubah/dihapus — kalau salah tulis, buat catatan baru sebagai koreksi. Cetak untuk ditandatangani basah oleh pasien/wali & dokter.</p>
+    <div class="row"><div><label>Nama Tindakan</label><input id="ptNamaTindakan" placeholder="cth: Pemasangan infus"></div>
+      <div><label>Jenis Persetujuan</label><select id="ptJenis"><option>Setuju</option><option>Menolak</option></select></div></div>
+    <label>Indikasi</label><input id="ptIndikasi" placeholder="cth: Dehidrasi sedang">
+    <label>Risiko yang Dijelaskan</label><textarea id="ptRisiko" placeholder="cth: Nyeri, bengkak, infeksi ringan di lokasi tusukan"></textarea>
+    <label>Alternatif Tindakan</label><textarea id="ptAlternatif" placeholder="cth: Rehidrasi oral (tidak memadai untuk kondisi saat ini)"></textarea>
+    <div class="row"><div><label>Nama yang Menyetujui/Menolak</label><input id="ptNamaMenyetujui" placeholder="cth: nama pasien/wali"></div>
+      <div><label>Hubungan dengan Pasien</label><input id="ptHubungan" placeholder="Diri Sendiri" value="Diri Sendiri"></div></div>
+    <label>Dokter Penjelas</label><input id="ptDokterPenjelas" placeholder="cth: dr. Contoh, Sp.PD">
+    <button class="btn" style="margin-top:10px" onclick="submitPersetujuanTindakan()">Simpan Persetujuan</button>
+    <div class="section-title" style="margin-top:16px">Daftar Persetujuan Tercatat</div>
+    ${(d.persetujuanTindakan||[]).length ? (d.persetujuanTindakan||[]).map(x=>`
+      <div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><b>${x.namaTindakan}</b> <span class="badge ${x.jenisPersetujuan==='Setuju'?'ok':'danger'}">${x.jenisPersetujuan}</span></div>
+          <span class="hint">${new Date(x.waktu).toLocaleString('id-ID')}</span>
+        </div>
+        ${x.indikasi ? `<div style="margin-top:4px"><b>Indikasi:</b> ${x.indikasi}</div>` : ""}
+        ${x.risikoDijelaskan ? `<div style="margin-top:2px"><b>Risiko dijelaskan:</b> ${x.risikoDijelaskan}</div>` : ""}
+        ${x.alternatifTindakan ? `<div style="margin-top:2px"><b>Alternatif:</b> ${x.alternatifTindakan}</div>` : ""}
+        <div style="margin-top:2px">Yang ${x.jenisPersetujuan==='Setuju'?'menyetujui':'menolak'}: <b>${x.namaYangMenyetujui}</b> (${x.hubunganDenganPasien})${x.dokterPenjelas?` — dijelaskan oleh ${x.dokterPenjelas}`:""}</div>
+        <div class="hint" style="margin-top:2px">Dicatat oleh ${x.namaPencatat||"-"} (${x.profesiPencatat||"-"})</div>
+      </div>`).join("") : `<div class="empty">Belum ada persetujuan tindakan tercatat</div>`}
+  </div>`;
   isiSelectPegawai("dpjpRIId");
   isiSelectPegawai("pelaksanaId");
+}
+async function submitPersetujuanTindakan(){
+  if(!val("ptNamaTindakan")){ toast("Nama tindakan wajib diisi"); return; }
+  if(!val("ptNamaMenyetujui")){ toast("Nama yang menyetujui/menolak wajib diisi"); return; }
+  const r = await api("tambahPersetujuanTindakan", {
+    kunjunganId: state.activeKunjunganId,
+    namaTindakan: val("ptNamaTindakan"), jenisPersetujuan: val("ptJenis"),
+    indikasi: val("ptIndikasi"), risikoDijelaskan: val("ptRisiko"), alternatifTindakan: val("ptAlternatif"),
+    namaYangMenyetujui: val("ptNamaMenyetujui"), hubunganDenganPasien: val("ptHubungan") || "Diri Sendiri",
+    dokterPenjelas: val("ptDokterPenjelas")
+  }, "POST");
+  if(r.ok){ toast("Persetujuan tindakan disimpan"); render(); } else { toast(r.msg || "Gagal menyimpan persetujuan tindakan"); }
 }
 async function submitAdmisi(){
   const dpjpPilih = pegawaiPayload("dpjpRIId","dpjpRIManual");
@@ -1603,12 +1680,16 @@ async function pagePulang(el){
   el.innerHTML += `<div class="card">
     <label>Cara Keluar</label>
     <select id="caraKeluar"><option>Pulang Normal</option><option>Pulang Paksa</option><option>Rujuk</option><option>Meninggal</option></select>
+    <label>Kondisi Saat Pulang</label>
+    <textarea id="kondisiPulang" placeholder="cth: Membaik, keluhan diare sudah reda"></textarea>
+    <label>Instruksi Kontrol / Obat Pulang</label>
+    <textarea id="instruksiPulang" placeholder="cth: Oralit bila diare kambuh, kontrol Poli Dalam 1 minggu lagi, hindari makanan pedas/bersantan"></textarea>
     <div style="margin-top:12px"><button class="btn" onclick="submitPulang()">Proses Pulang</button></div>
     <div id="resumeHasil" style="margin-top:16px"></div>
   </div>`;
 }
 async function submitPulang(){
-  const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar")}, "POST");
+  const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar"), kondisiPulang:val("kondisiPulang"), instruksiPulang:val("instruksiPulang")}, "POST");
   if(r.ok){
     toast("Pasien berhasil diproses pulang");
     const k = r.prediksiINACBG;
@@ -1634,9 +1715,18 @@ async function tampilkanCetak(kunjunganId){
       <h2>RSU Allam Medica</h2>
       <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Resume Medis & Kuitansi Pasien Pulang</div>
       <div class="grid cols2" style="margin-bottom:10px;">
-        <div><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Jenis Kelamin:</b> ${p.jk||p.JK||"-"}</div>
+        <div><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Jenis Kelamin:</b> ${p.jk||p.JK||"-"}<br><b>Alergi:</b> ${p.alergi||p.Alergi||"Tidak ada catatan alergi"}</div>
         <div><b>DPJP:</b> ${d.kunjungan.dpjp||d.kunjungan.DPJP||"-"}<br><b>Jenis Kunjungan:</b> ${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}<br>${d.rawatInap?`<b>Tgl Masuk – Keluar:</b> ${tglMasuk} – ${tglKeluar}`:""}</div>
       </div>
+      ${(d.kunjungan.diagnosaMedisDokter||d.kunjungan.DiagnosaMedisDokter) ? `<div class="section-title">Diagnosa Klinis Dokter</div><div>${d.kunjungan.diagnosaMedisDokter||d.kunjungan.DiagnosaMedisDokter}</div>` : ""}
+      ${d.asesmenAwal ? `<div class="section-title">Ringkasan Asesmen Awal</div>
+      <div>
+        ${d.asesmenAwal.riwayatPenyakitSekarang ? `<div><b>Riwayat Penyakit Sekarang:</b> ${d.asesmenAwal.riwayatPenyakitSekarang}</div>` : ""}
+        ${d.asesmenAwal.riwayatPenyakitDahulu ? `<div><b>Riwayat Penyakit Dahulu:</b> ${d.asesmenAwal.riwayatPenyakitDahulu}</div>` : ""}
+        ${d.asesmenAwal.riwayatPenyakitKeluarga ? `<div><b>Riwayat Penyakit Keluarga:</b> ${d.asesmenAwal.riwayatPenyakitKeluarga}</div>` : ""}
+        ${d.asesmenAwal.riwayatAlergi ? `<div><b>Riwayat Alergi:</b> ${d.asesmenAwal.riwayatAlergi}</div>` : ""}
+        ${d.asesmenAwal.pemeriksaanFisik ? `<div><b>Pemeriksaan Fisik:</b> ${d.asesmenAwal.pemeriksaanFisik}</div>` : ""}
+      </div>` : ""}
       <div class="section-title">Diagnosa</div>
       <table><tr><th>Jenis</th><th>Kode ICD-10</th><th>Deskripsi</th></tr>
         ${d.diagnosa.map(x=>`<tr><td>${x.jenis||x.JenisDiagnosa}</td><td>${x.kodeICD10||x.KodeICD10}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")||'<tr><td colspan="3" class="empty">-</td></tr>'}
@@ -1645,6 +1735,10 @@ async function tampilkanCetak(kunjunganId){
       <table><tr><th>Kode ICD-9-CM</th><th>Deskripsi</th></tr>
         ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")||'<tr><td colspan="2" class="empty">-</td></tr>'}
       </table>
+      ${(d.persetujuanTindakan||[]).length ? `<div class="section-title">Persetujuan Tindakan Kedokteran</div>
+      <table><tr><th>Tindakan</th><th>Persetujuan</th><th>Yang Menyetujui/Menolak</th><th>Hubungan</th></tr>
+        ${d.persetujuanTindakan.map(x=>`<tr><td>${x.namaTindakan}</td><td>${x.jenisPersetujuan}</td><td>${x.namaYangMenyetujui}</td><td>${x.hubunganDenganPasien}</td></tr>`).join("")}
+      </table>` : ""}
       <div class="section-title">Kuitansi</div>
       <table>
         <tr><th>Kategori</th><th>Deskripsi</th><th>Qty</th><th>Total</th></tr>
@@ -1652,6 +1746,11 @@ async function tampilkanCetak(kunjunganId){
         <tr class="total-row"><td colspan="3">TOTAL</td><td>Rp${totalBilling.toLocaleString('id-ID')}</td></tr>
       </table>
       ${d.klaim ? `<div class="section-title">Prediksi INA-CBG</div><div>Kode: <b>${d.klaim.KodeCBGPrediksi}</b> — Tarif: Rp${Number(d.klaim.TarifPrediksi).toLocaleString('id-ID')}</div>` : ""}
+      ${(d.kunjungan.kondisiPulang || d.kunjungan.instruksiPulang) ? `<div class="section-title">Kondisi Pulang & Instruksi Kontrol</div>
+      <div>
+        ${d.kunjungan.kondisiPulang ? `<div><b>Kondisi Saat Pulang:</b> ${d.kunjungan.kondisiPulang}</div>` : ""}
+        ${d.kunjungan.instruksiPulang ? `<div style="margin-top:4px"><b>Instruksi Kontrol / Obat Pulang:</b> ${d.kunjungan.instruksiPulang}</div>` : ""}
+      </div>` : ""}
     </div>
     <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>
   `;
