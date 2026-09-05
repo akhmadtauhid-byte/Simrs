@@ -194,10 +194,49 @@ const ROLE_ACCESS = {
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
 };
+// Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
+// bisa mencentang modul satu per satu per staf lewat halaman "Kelola Hak
+// Akses". Satu modul bisa membuka lebih dari satu menu (mis. modul lab/rad/
+// farmasi/gizi/cssd/linen semuanya membuka menu "penunjang" yang sama).
+const MODUL_KE_NAV = {
+  pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd"], rekammedis:["rekammedis"],
+  billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
+  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang"], gizi:["penunjang"], cssd:["penunjang"], linen:["penunjang"],
+  tarif:["tarif"]
+};
+// Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
+const DAFTAR_MODUL = [
+  {id:"pendaftaran", label:"Pendaftaran"},
+  {id:"kunjungan", label:"Kunjungan Aktif"},
+  {id:"igd", label:"IGD"},
+  {id:"rekammedis", label:"Diagnosa & Tindakan (Rekam Medis)"},
+  {id:"billing", label:"Billing"},
+  {id:"inacbg", label:"Prediksi INA-CBG"},
+  {id:"pulang", label:"Proses Pulang"},
+  {id:"rekap", label:"Rekap Klaim"},
+  {id:"aturanba", label:"Aturan BA 2024"},
+  {id:"lab", label:"Unit Penunjang — Lab"},
+  {id:"rad", label:"Unit Penunjang — Radiologi"},
+  {id:"farmasi", label:"Unit Penunjang — Farmasi"},
+  {id:"gizi", label:"Unit Penunjang — Gizi"},
+  {id:"cssd", label:"Unit Penunjang — CSSD"},
+  {id:"linen", label:"Unit Penunjang — Linen"},
+  {id:"tarif", label:"Master Tarif"},
+  {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
+];
 function navAllowed(){
   if(!state.user) return [];
-  const role = (state.user.role||"admin").toLowerCase();
-  return ROLE_ACCESS[role] || ROLE_ACCESS.admin;
+  if(state.user.role === "admin") return NAV.map(n=>n.id);
+  const role = (state.user.role||"").toLowerCase();
+  // PERBAIKAN: dulu ada fallback "|| ROLE_ACCESS.admin" yang diam-diam memberi
+  // SEMUA menu admin ke role manapun yang tidak cocok di ROLE_ACCESS (termasuk
+  // role baru "staf" untuk hak akses granular). Sekarang kalau role tidak
+  // dikenal, dianggap TIDAK ADA menu bawaan (aman secara default) — menu staf
+  // "staf" murni datang dari modul yang dicentang admin di bawah ini.
+  const daftarLegacy = ROLE_ACCESS[role] || [];
+  const modul = state.user.modul || [];
+  const daftarModul = modul.flatMap(m => MODUL_KE_NAV[m] || []);
+  return Array.from(new Set(["dashboard", ...daftarLegacy, ...daftarModul]));
 }
 
 function renderNav(){
@@ -211,6 +250,7 @@ function renderNav(){
   if(ub && state.user){
     ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br>
       ${DEMO_MODE ? "" : `<button onclick="mulaiSetup2FA()">🔒 Aktifkan 2FA</button>`}
+      ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaHakAkses()">🗂️ Kelola Hak Akses</button>` : ""}
       <button onclick="logout()">Keluar</button>`;
   }
 }
@@ -242,7 +282,7 @@ async function doLogin(){
   const password = document.getElementById("loginPass").value.trim();
   const r = await api("login", {username, password}, "POST");
   if(r.ok){
-    state.user = {nama:r.nama, role:r.role};
+    state.user = {nama:r.nama, role:r.role, modul:r.modul||[]};
     rebuildAppShell();
     render();
   } else if(r.mfaRequired){
@@ -272,7 +312,7 @@ async function submitMfaLogin(){
   if(!code){ document.getElementById("loginErr").textContent = "Masukkan kode 2FA"; return; }
   const r = await verifyMfaLogin(code);
   if(r.ok){
-    state.user = {nama:r.nama, role:r.role};
+    state.user = {nama:r.nama, role:r.role, modul:r.modul||[]};
     rebuildAppShell();
     render();
   } else {
@@ -294,7 +334,8 @@ async function verifyMfaLogin(code){
     const { data: profile, error: profileErr } = await supabase
       .from("profiles").select("nama, role, aktif").eq("id", userData.user.id).single();
     if(profileErr || !profile || !profile.aktif) return {ok:false, msg:"Akun tidak ditemukan / tidak aktif"};
-    return {ok:true, nama:profile.nama, role:profile.role};
+    const modul = await fetchModulSaya();
+    return {ok:true, nama:profile.nama, role:profile.role, modul};
   }catch(err){
     return {ok:false, msg:"Gagal verifikasi 2FA: "+err.message};
   }
@@ -340,6 +381,45 @@ async function verifikasiSetup2FA(){
     goTo("dashboard");
   }catch(err){ toast("Gagal mengaktifkan 2FA: "+err.message); }
 }
+
+/* ============ KELOLA HAK AKSES (khusus admin) ============ */
+async function pageKelolaHakAkses(){
+  const m = document.getElementById("main");
+  m.innerHTML = `<h1>Kelola Hak Akses Staf</h1>
+    <p class="sub">Centang modul yang boleh dibuka tiap staf secara individual. Akun dengan role tetap lama (admin/pendaftaran/rekam medis/kasir/verifikator) tetap jalan seperti biasa — centang di sini menambah akses, tidak mengurangi. Untuk staf baru, buat akunnya dengan role "staf" lalu atur sepenuhnya lewat halaman ini.</p>
+    <button class="btn ghost" style="margin-bottom:14px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
+    <div id="hakAksesBody" class="empty">Memuat...</div>`;
+  const r = await api("kelolaStaf.list", {}, "POST");
+  const body = document.getElementById("hakAksesBody");
+  if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat data"}</div>`; return; }
+  if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada staf terdaftar.</div>`; return; }
+  body.innerHTML = r.data.map(s => `
+    <div class="card" style="margin-bottom:14px">
+      <div><b>${s.nama}</b> <span class="badge muted">${s.role}</span> ${s.aktif?'':'<span class="badge danger">nonaktif</span>'}</div>
+      <div class="row" style="margin-top:8px">
+        <div><label>Jabatan (label tampilan saja, tidak memengaruhi akses)</label>
+          <input id="jbt_${s.id}" value="${(s.jabatan||'').replace(/"/g,'&quot;')}" placeholder="mis. Apoteker, Perawat IGD, Dokter Umum"></div>
+        <div style="flex:0 0 auto;align-self:flex-end"><button class="btn sm ghost" onclick="simpanJabatan('${s.id}')">Simpan Jabatan</button></div>
+      </div>
+      <div class="section-title">Modul yang diizinkan</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 14px">
+        ${DAFTAR_MODUL.map(mo => `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+          <input type="checkbox" id="mod_${s.id}_${mo.id}" ${((s.modul||[]).includes(mo.id))?"checked":""} style="width:auto">${mo.label}
+        </label>`).join("")}
+      </div>
+      <button class="btn" style="margin-top:10px" onclick="simpanModul('${s.id}')">Simpan Hak Akses</button>
+    </div>`).join("");
+}
+async function simpanJabatan(profileId){
+  const jabatan = document.getElementById("jbt_"+profileId).value.trim();
+  const r = await api("kelolaStaf.setJabatan", {profileId, jabatan}, "POST");
+  toast(r.ok ? "Jabatan disimpan" : (r.msg||"Gagal menyimpan jabatan"));
+}
+async function simpanModul(profileId){
+  const modulList = DAFTAR_MODUL.filter(mo => document.getElementById("mod_"+profileId+"_"+mo.id).checked).map(mo=>mo.id);
+  const r = await api("kelolaStaf.setModul", {profileId, modulList}, "POST");
+  toast(r.ok ? "Hak akses disimpan — staf terkait perlu logout & login ulang supaya menu terbaru muncul" : (r.msg||"Gagal menyimpan hak akses"));
+}
 function rebuildAppShell(){
   document.getElementById("app").outerHTML = `<div id="app" class="app">
     <div class="side">
@@ -351,6 +431,16 @@ function rebuildAppShell(){
   </div>`;
 }
 
+
+// Hak akses granular: ambil daftar modul yang dicentang admin untuk akun
+// yang sedang login (kosong kalau akun ini masih pakai role tetap lama saja).
+async function fetchModulSaya(){
+  try{
+    const { data, error } = await supabase.rpc("api_dispatch", { p_action: "getModulSaya", p_payload: {} });
+    if(error || !data || !data.ok) return [];
+    return data.modul || [];
+  }catch(err){ return []; }
+}
 
 async function api(action, data, method){
   if (DEMO_MODE) return localApi(action, data);
@@ -381,7 +471,8 @@ async function api(action, data, method){
       await supabase.auth.signOut();
       return {ok:false, msg:"Akun tidak ditemukan / tidak aktif. Hubungi admin."};
     }
-    return {ok:true, nama: profile.nama, role: profile.role};
+    const modul = await fetchModulSaya();
+    return {ok:true, nama: profile.nama, role: profile.role, modul};
   }
 
   try{
@@ -977,7 +1068,7 @@ async function patientStrip(kunjunganId){
   // hanya 4 digit terakhir (p.nik4). Untuk role yang berwenang, sediakan
   // tombol yang memanggil fn_decrypt_nik lewat aksi khusus "lihatNikLengkap"
   // (wajib role sah + sesi 2FA, dan setiap klik tercatat di server).
-  const bolehLihatNik = !DEMO_MODE && state.user && ["admin","rekam_medis","verifikator"].includes(state.user.role);
+  const bolehLihatNik = !DEMO_MODE && state.user && (["admin","rekam_medis","verifikator"].includes(state.user.role) || (state.user.modul||[]).includes("lihat_nik"));
   const nikBaris = p.id ? `NIK: ****${p.nik4||p.NIK4||"----"}${bolehLihatNik ? ` <button class="btn sm ghost" onclick="lihatNikLengkap('${p.id}')">Lihat NIK Lengkap</button>` : ""}` : "";
   return `<div class="patient-strip">
     <div><b>${p.nama||p.Nama||"-"}</b> · RM ${p.RM||"-"}</div>
@@ -1206,20 +1297,27 @@ async function pageAturanBA(el){
   document.getElementById("listAturan").innerHTML = renderGroup("Aspek Administrasi", admin) + renderGroup("Aspek Medis", medis);
 }
 
+// Hak akses granular: staf dengan role tetap lama (admin/kasir/verifikator)
+// tetap melihat semua sub-unit seperti sebelumnya (tidak berubah). Staf baru
+// (role "staf") hanya melihat sub-unit yang modulnya dicentangkan admin —
+// misalnya apoteker cuma lihat tab Farmasi, bukan keenamnya.
+const PENUNJANG_TAB_LABEL = {lab:"Lab", rad:"Radiologi", farmasi:"Farmasi", gizi:"Gizi", cssd:"CSSD", linen:"Linen"};
+function penunjangTabsAllowed(){
+  const semua = Object.keys(PENUNJANG_TAB_LABEL);
+  if(!state.user) return [];
+  if(["admin","kasir","verifikator"].includes(state.user.role)) return semua;
+  return semua.filter(m => (state.user.modul||[]).includes(m));
+}
 async function pagePenunjang(el){
+  const tabs = penunjangTabsAllowed();
   el.innerHTML = `<h1>Unit Penunjang</h1><p class="sub">Lab, Radiologi, Farmasi, Gizi, CSSD, Linen</p>
     <div class="card">
       <div id="penunjangTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
-        <button class="btn" onclick="renderPenunjangTab('lab')">Lab</button>
-        <button class="btn" onclick="renderPenunjangTab('rad')">Radiologi</button>
-        <button class="btn" onclick="renderPenunjangTab('farmasi')">Farmasi</button>
-        <button class="btn" onclick="renderPenunjangTab('gizi')">Gizi</button>
-        <button class="btn" onclick="renderPenunjangTab('cssd')">CSSD</button>
-        <button class="btn" onclick="renderPenunjangTab('linen')">Linen</button>
+        ${tabs.map(t=>`<button class="btn" onclick="renderPenunjangTab('${t}')">${PENUNJANG_TAB_LABEL[t]}</button>`).join("")}
       </div>
-      <div id="penunjangBody"></div>
+      <div id="penunjangBody">${tabs.length ? "" : `<div class="empty">Belum ada sub-unit penunjang yang diizinkan untuk akun Anda. Hubungi admin.</div>`}</div>
     </div>`;
-  renderPenunjangTab('lab');
+  if(tabs.length) renderPenunjangTab(tabs[0]);
 }
 
 async function renderPenunjangTab(tab){
