@@ -183,7 +183,13 @@ const NAV = [
 const ROLE_ACCESS = {
   admin: NAV.map(n=>n.id),
   pendaftaran: ["dashboard","pendaftaran","kunjungan"],
-  rekammedis: ["dashboard","kunjungan","rekammedis","aturanba","igd"],
+  // PERBAIKAN Fase 3: kunci ini dulu tertulis "rekammedis" (tanpa garis-bawah),
+  // padahal role sungguhan dari database (Supabase) adalah "rekam_medis". Akibatnya
+  // staf rekam medis tidak pernah cocok dengan kunci manapun di sini, dan baris
+  // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
+  // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
+  // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
+  rekam_medis: ["dashboard","kunjungan","rekammedis","aturanba","igd"],
   perawat: ["dashboard","kunjungan","rekammedis","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
@@ -203,7 +209,9 @@ function renderNav(){
     </button>`).join("");
   const ub = document.getElementById("userBox");
   if(ub && state.user){
-    ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br><button onclick="logout()">Keluar</button>`;
+    ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br>
+      ${DEMO_MODE ? "" : `<button onclick="mulaiSetup2FA()">🔒 Aktifkan 2FA</button>`}
+      <button onclick="logout()">Keluar</button>`;
   }
 }
 function goTo(page){
@@ -237,9 +245,100 @@ async function doLogin(){
     state.user = {nama:r.nama, role:r.role};
     rebuildAppShell();
     render();
+  } else if(r.mfaRequired){
+    // Fase 3: akun ini sudah mengaktifkan 2FA — minta kode Authenticator
+    // sebelum benar-benar masuk (sesi password saja belum cukup / "aal1").
+    renderMfaLoginPrompt();
   } else {
     document.getElementById("loginErr").textContent = r.msg || "Login gagal";
   }
+}
+
+/* ============ FASE 3: VERIFIKASI 2FA SAAT LOGIN ============ */
+function renderMfaLoginPrompt(){
+  document.getElementById("app").innerHTML = `
+    <div class="login-wrap"><div class="login-card">
+      <h1>Verifikasi 2 Langkah</h1>
+      <p>Buka aplikasi Authenticator di HP Anda, lalu masukkan 6 digit kode yang tampil di sana.</p>
+      <label>Kode 2FA</label>
+      <input id="mfaCode" maxlength="6" inputmode="numeric" placeholder="123456" onkeydown="if(event.key==='Enter')submitMfaLogin()">
+      <button class="btn" onclick="submitMfaLogin()">Verifikasi</button>
+      <div class="login-err" id="loginErr"></div>
+    </div></div>`;
+  document.getElementById("mfaCode").focus();
+}
+async function submitMfaLogin(){
+  const code = (document.getElementById("mfaCode").value||"").trim();
+  if(!code){ document.getElementById("loginErr").textContent = "Masukkan kode 2FA"; return; }
+  const r = await verifyMfaLogin(code);
+  if(r.ok){
+    state.user = {nama:r.nama, role:r.role};
+    rebuildAppShell();
+    render();
+  } else {
+    document.getElementById("loginErr").textContent = r.msg || "Kode salah, coba lagi";
+  }
+}
+async function verifyMfaLogin(code){
+  try{
+    const { data: factorData, error: factorErr } = await supabase.auth.mfa.listFactors();
+    if(factorErr) return {ok:false, msg:"Gagal membaca faktor 2FA: "+factorErr.message};
+    const totpFactor = (factorData.totp||[])[0];
+    if(!totpFactor) return {ok:false, msg:"Tidak ada faktor 2FA terdaftar"};
+    const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({ factorId: totpFactor.id });
+    if(chErr) return {ok:false, msg:"Gagal memulai verifikasi: "+chErr.message};
+    const { error: vErr } = await supabase.auth.mfa.verify({ factorId: totpFactor.id, challengeId: challenge.id, code });
+    if(vErr) return {ok:false, msg:"Kode 2FA salah atau sudah kedaluwarsa"};
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if(userErr || !userData.user) return {ok:false, msg:"Sesi tidak valid, ulangi login dari awal"};
+    const { data: profile, error: profileErr } = await supabase
+      .from("profiles").select("nama, role, aktif").eq("id", userData.user.id).single();
+    if(profileErr || !profile || !profile.aktif) return {ok:false, msg:"Akun tidak ditemukan / tidak aktif"};
+    return {ok:true, nama:profile.nama, role:profile.role};
+  }catch(err){
+    return {ok:false, msg:"Gagal verifikasi 2FA: "+err.message};
+  }
+}
+
+/* ============ FASE 3: AKTIFKAN 2FA (dari menu setelah login) ============ */
+async function mulaiSetup2FA(){
+  try{
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+    if(error){ toast("Gagal memulai setup 2FA: "+error.message); return; }
+    window.__mfaEnroll = data; // {id, totp:{qr_code, secret, uri}}
+    render2FASetup();
+  }catch(err){ toast("Gagal memulai setup 2FA: "+err.message); }
+}
+function render2FASetup(){
+  const m = document.getElementById("main");
+  const d = window.__mfaEnroll;
+  m.innerHTML = `<h1>Aktifkan Verifikasi 2 Langkah (2FA)</h1>
+    <p class="sub">Melindungi akun Anda — terutama penting untuk melihat NIK pasien secara penuh.</p>
+    <div class="card" style="max-width:420px">
+      <p><b>1.</b> Pasang aplikasi Authenticator di HP (Google Authenticator, Microsoft Authenticator, atau Authy — gratis di Play Store/App Store) kalau belum punya.</p>
+      <p><b>2.</b> Buka aplikasi itu, pilih tambah akun lewat scan QR, lalu arahkan kamera ke gambar ini:</p>
+      <div style="text-align:center;margin:12px 0"><img src="${d.totp.qr_code}" style="width:200px;height:200px;border:1px solid var(--line);border-radius:8px"></div>
+      <p class="hint">Tidak bisa scan? Masukkan kode ini secara manual di aplikasi Authenticator: <code>${d.totp.secret}</code></p>
+      <p><b>3.</b> Masukkan 6 digit kode yang muncul di aplikasi Authenticator Anda:</p>
+      <input id="kode2fa" maxlength="6" inputmode="numeric" placeholder="123456">
+      <button class="btn" style="margin-top:10px" onclick="verifikasiSetup2FA()">Aktifkan 2FA</button>
+      <button class="btn ghost" style="margin-top:10px" onclick="goTo('dashboard')">Batal</button>
+    </div>`;
+}
+async function verifikasiSetup2FA(){
+  const code = (document.getElementById("kode2fa").value||"").trim();
+  const factorId = window.__mfaEnroll && window.__mfaEnroll.id;
+  if(!factorId){ toast("Sesi setup 2FA hilang, ulangi dari menu"); return; }
+  if(!code){ toast("Masukkan 6 digit kode dari aplikasi Authenticator"); return; }
+  try{
+    const { data: challenge, error: chErr } = await supabase.auth.mfa.challenge({ factorId });
+    if(chErr){ toast("Gagal: "+chErr.message); return; }
+    const { error: vErr } = await supabase.auth.mfa.verify({ factorId, challengeId: challenge.id, code });
+    if(vErr){ toast("Kode salah, coba lagi"); return; }
+    toast("2FA berhasil diaktifkan! Login berikutnya akan meminta kode ini.");
+    window.__mfaEnroll = null;
+    goTo("dashboard");
+  }catch(err){ toast("Gagal mengaktifkan 2FA: "+err.message); }
 }
 function rebuildAppShell(){
   document.getElementById("app").outerHTML = `<div id="app" class="app">
@@ -266,6 +365,16 @@ async function api(action, data, method){
     const email = `${username}@${EMAIL_DOMAIN}`;
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
     if (authError || !authData.user) return {ok:false, msg:"Username / password salah"};
+
+    // Fase 3: kalau akun ini sudah punya 2FA aktif, sesi password saja ("aal1")
+    // belum cukup untuk masuk — minta verifikasi kode Authenticator dulu
+    // ("aal2") sebelum mengizinkan akses. Kalau akun belum aktifkan 2FA,
+    // currentLevel sudah sama dengan nextLevel dan langsung lanjut seperti biasa.
+    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalData && aalData.nextLevel === "aal2" && aalData.currentLevel !== aalData.nextLevel){
+      return {ok:false, mfaRequired:true, msg:"Perlu verifikasi 2FA"};
+    }
+
     const { data: profile, error: profileError } = await supabase
       .from("profiles").select("nama, role, aktif").eq("id", authData.user.id).single();
     if (profileError || !profile || !profile.aktif){
@@ -864,12 +973,27 @@ async function patientStrip(kunjunganId){
   if(!d.ok) return `<div class="card empty">Kunjungan tidak ditemukan.</div>`;
   window.__detail = d;
   const p = d.pasien||{};
+  // Fase 3: NIK penuh tidak pernah dikirim server dalam respons biasa —
+  // hanya 4 digit terakhir (p.nik4). Untuk role yang berwenang, sediakan
+  // tombol yang memanggil fn_decrypt_nik lewat aksi khusus "lihatNikLengkap"
+  // (wajib role sah + sesi 2FA, dan setiap klik tercatat di server).
+  const bolehLihatNik = !DEMO_MODE && state.user && ["admin","rekam_medis","verifikator"].includes(state.user.role);
+  const nikBaris = p.id ? `NIK: ****${p.nik4||p.NIK4||"----"}${bolehLihatNik ? ` <button class="btn sm ghost" onclick="lihatNikLengkap('${p.id}')">Lihat NIK Lengkap</button>` : ""}` : "";
   return `<div class="patient-strip">
     <div><b>${p.nama||p.Nama||"-"}</b> · RM ${p.RM||"-"}</div>
     <div>${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}</div>
     <div>DPJP: ${d.kunjungan.dpjp||d.kunjungan.DPJP||"-"}</div>
     <div>Kunjungan: ${kunjunganId}</div>
+    ${nikBaris ? `<div>${nikBaris}</div>` : ""}
   </div>`;
+}
+async function lihatNikLengkap(pasienId){
+  const r = await api("lihatNikLengkap", {pasienId});
+  if(r.ok){
+    alert("NIK lengkap pasien ini: " + (r.nik || "(belum diisi saat pendaftaran)"));
+  } else {
+    toast(r.msg || "Gagal mengambil NIK");
+  }
 }
 
 async function pageRekamMedis(el){
