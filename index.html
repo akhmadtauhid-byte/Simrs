@@ -1223,8 +1223,23 @@ async function pageRekamMedis(el){
   if(!state.activeKunjunganId) return;
   const d = window.__detail;
   const isRI = (d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan) !== "Rawat Jalan";
+  const diagDokterAwal = d.kunjungan.diagnosaMedisDokter || d.kunjungan.DiagnosaMedisDokter || "";
 
-  el.innerHTML += `<div class="grid cols2">
+  el.innerHTML += `<div class="card" style="margin-bottom:14px">
+    <div class="section-title">Diagnosa Klinis Dokter (bahasa medis)</div>
+    <p class="hint">Kalimat diagnosis dokter apa adanya (bukan kode) — dibutuhkan pihak BPJS untuk verifikasi, terpisah dari daftar kode ICD-10 di bawah. Boleh dikosongkan.</p>
+    <textarea id="diagnosaMedisDokter" placeholder="cth: Gastroenteritis akut dengan dehidrasi ringan-sedang">${diagDokterAwal.replace(/</g,"&lt;")}</textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="simpanDiagnosaMedisDokter()">Simpan</button>
+      <button class="btn ghost" onclick="analisaKodeDariDiagnosa()">🔎 Analisa &amp; Cari Saran Kode ICD-10 / ICD-9 dari Kalimat Ini</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div><label>Saran Kode ICD-10 (Diagnosa)</label><div id="saranICD10DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
+      <div><label>Saran Kode ICD-9-CM (Tindakan)</label><div id="saranICD9DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
+    </div>
+    <p class="hint">💡 Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
+  </div>
+  <div class="grid cols2">
     ${isRI ? `<div class="card">
       <div class="section-title">Admisi Rawat Inap</div>
       ${d.rawatInap ? `<div class="hint">Sudah diadmisi: Ruangan ${d.rawatInap.ruangan||d.rawatInap.Ruangan}, Kelas ${d.rawatInap.kelas||d.rawatInap.Kelas}</div>` : `
@@ -1262,6 +1277,12 @@ async function pageRekamMedis(el){
     </div>
   </div>
   <p class="hint">💡 Ketik minimal 2 huruf di kotak pencarian untuk melihat saran kode dari database resmi ICD-10 / ICD-9-CM (7.433 & 3.979 kode). Klik saran untuk mengisi otomatis kode + deskripsi.</p>
+  <div class="section-title">🧮 Perkiraan Kode INA-CBG (bantu koding, opsional)</div>
+  <div class="card">
+    <p class="hint">Berdasarkan diagnosa & tindakan yang sudah tercatat, sistem bisa memperkirakan kode INA-CBG-nya sekarang juga — tidak perlu menunggu sampai menu "Prediksi INA-CBG" (Langkah 5). Perkiraan ini akan dihitung ulang otomatis nanti kalau ada tambahan diagnosa/tindakan/billing.</p>
+    <button class="btn ghost" onclick="analisaPrediksiCBGAwal()">🔮 Lihat Perkiraan Kode CBG Sekarang</button>
+    <div id="hasilCbgAwal" style="margin-top:12px"></div>
+  </div>
   <div class="grid" style="display:none"></div>
   <div class="section-title">Diagnosa Tercatat</div>
   <div class="card">${d.diagnosa.length ? `<table><tr><th>Jenis</th><th>Kode</th><th>Deskripsi</th></tr>
@@ -1287,6 +1308,67 @@ async function submitTindakan(){
   const pelPilih = pegawaiPayload("pelaksanaId","pelaksanaManual");
   const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
   if(r.ok){ toast("Tindakan ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan tindakan"); }
+}
+
+async function simpanDiagnosaMedisDokter(){
+  const r = await api("simpanDiagnosaMedisDokter", {kunjunganId:state.activeKunjunganId, diagnosaMedisDokter: val("diagnosaMedisDokter")}, "POST");
+  toast(r.ok ? "Diagnosa klinis dokter disimpan" : (r.msg || "Gagal menyimpan"));
+}
+
+// Analisa kalimat diagnosa dokter (bahasa medis bebas): pecah jadi kata kunci,
+// lalu cari tiap kata kunci itu ke database resmi ICD-10 (diagnosa) & ICD-9-CM
+// (tindakan) yang sudah ada (fungsi pencarian yang sama dipakai kotak "Cari
+// Kode" di bawah) — kode yang cocok dengan LEBIH BANYAK kata kunci ditaruh di
+// atas. Ini murni pencocokan kata dari database resmi, BUKAN kecerdasan
+// buatan/AI — tetap wajib dicek ulang oleh dokter/petugas rekam medis sebelum
+// disimpan, terutama untuk kalimat yang punya banyak istilah umum.
+const STOPWORD_DIAGNOSA = new Set(["dan","dengan","dgn","di","ke","dari","pada","yang","atau","tanpa","tidak","ada","akibat","karena","et","causa","suspek","susp","serta","untuk","akan","juga","sudah","belum","masih","oleh","sejak","disertai","tampak","terdapat","adalah","merupakan","suatu","beberapa","seperti","berupa","ringan","sedang","berat","kronis","akut"]);
+function ambilKataKunciDiagnosa(teks){
+  return Array.from(new Set(
+    teks.toLowerCase().replace(/[^a-z0-9\s-]/g," ").split(/\s+/)
+      .filter(w => w.length >= 4 && !STOPWORD_DIAGNOSA.has(w))
+  )).slice(0, 6); // maksimal 6 kata kunci supaya tidak terlalu banyak permintaan ke server
+}
+async function kumpulkanSaranKode(kataKunci, searchFn){
+  const skor = {};
+  for(const kw of kataKunci){
+    const hasil = await searchFn(kw);
+    (hasil||[]).forEach(r=>{
+      const kode = r.Kode||r.kode, desk = r.Deskripsi||r.deskripsi;
+      if(!skor[kode]) skor[kode] = {kode, desk, cocok:0};
+      skor[kode].cocok++;
+    });
+  }
+  return Object.values(skor).sort((a,b)=> b.cocok - a.cocok || a.kode.localeCompare(b.kode)).slice(0,10);
+}
+async function analisaKodeDariDiagnosa(){
+  const teks = val("diagnosaMedisDokter");
+  const box10 = document.getElementById("saranICD10DariDiagnosa");
+  const box9 = document.getElementById("saranICD9DariDiagnosa");
+  if(!teks || teks.length < 3){ toast("Ketik dulu kalimat diagnosa dokter (minimal 3 huruf) untuk dianalisa"); return; }
+  const kataKunci = ambilKataKunciDiagnosa(teks);
+  if(!kataKunci.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box9.innerHTML=""; return; }
+  toast("Menganalisa "+kataKunci.length+" kata kunci dari kalimat diagnosa...");
+  const [saran10, saran9] = await Promise.all([ kumpulkanSaranKode(kataKunci, searchICD10API), kumpulkanSaranKode(kataKunci, searchICD9API) ]);
+  const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
+  box10.innerHTML = saran10.length ? saran10.map(baris("icd10")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
+  box9.innerHTML = saran9.length ? saran9.map(baris("icd9")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-9-CM yang cocok dengan kalimat ini</div>`;
+  toast("Saran kode ditemukan — klik salah satu untuk mengisi otomatis (tetap cek ulang kecocokannya)");
+}
+function isiDariSaran(jenis, kode, desk){
+  if(jenis==="icd10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; toast("Kode ICD-10 diisi: "+kode); }
+  if(jenis==="icd9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; toast("Kode ICD-9-CM diisi: "+kode); }
+}
+async function analisaPrediksiCBGAwal(){
+  const d = window.__detail;
+  if(!d || !d.diagnosa || !d.diagnosa.length){ toast("Tambahkan minimal satu Diagnosa Utama dulu sebelum bisa dianalisa"); return; }
+  // Pakai fungsi PRATINJAU (tidak menulis ke tabel klaim) supaya siapa pun yang
+  // berwenang mengisi diagnosa (rekam medis/dokter) bisa melihat perkiraan kode
+  // di sini — perkiraan resmi & tersimpan tetap lewat menu "Prediksi INA-CBG"
+  // (Langkah 5) oleh verifikator, seperti biasa.
+  const r = await api("prediksiINACBGPreview", {kunjunganId:state.activeKunjunganId}, "POST");
+  if(r.ok){ renderHasilCbg(r.data, "hasilCbgAwal"); toast("Perkiraan kode CBG diperbarui (pratinjau, belum tersimpan)"); }
+  else toast(r.msg || "Gagal menganalisa kode CBG — lengkapi diagnosa/kelas rawat dulu");
 }
 
 async function pageBilling(el){
@@ -1328,10 +1410,10 @@ async function jalankanPrediksi(){
   const r = await api("prediksiINACBG", {kunjunganId:state.activeKunjunganId}, "POST");
   if(r.ok){ renderHasilCbg(r.data); toast("Prediksi selesai"); }
 }
-function renderHasilCbg(k){
+function renderHasilCbg(k, targetId){
   const selisih = Number(k.Selisih||k.selisih||0);
   const flagWarn = k.Catatan && k.Catatan.split(" | ").filter(Boolean);
-  document.getElementById("hasilCbg").innerHTML = `
+  document.getElementById(targetId || "hasilCbg").innerHTML = `
     <div class="cbg-result">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;">
         <div><span class="hint">KODE CBG PREDIKSI</span><br><b class="code">${k.KodeCBGPrediksi}</b><div>${k.DeskripsiCBG}</div></div>
