@@ -1933,8 +1933,8 @@ async function renderPenunjangTab(tab){
     const label = tab === 'lab' ? 'Lab' : 'Radiologi';
     body.innerHTML = `
       <div class="section-title">Buat Order ${label} Baru</div>
-      <label>No. RM</label><input id="pj_norm">
-      <label>Nama Pasien</label><input id="pj_nama">
+      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+      <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Unit Asal</label><input id="pj_unit">
       <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="${tab==='lab'?'Darah Rutin, dll':'Rontgen Thorax, dll'}">
       <label>Dokter Pengirim</label><input id="pj_dokter">
@@ -1951,8 +1951,8 @@ async function renderPenunjangTab(tab){
     const obatOptions = (obatRows||[]).map(o=>`<option value="${o.kode}">${o.namaObat} (stok ${o.stok}${o.satuan?(' '+o.satuan):''})</option>`).join("");
     body.innerHTML = `
       <div class="section-title">Buat Resep Baru</div>
-      <label>No. RM</label><input id="pj_norm">
-      <label>Nama Pasien</label><input id="pj_nama">
+      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+      <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Dokter</label><input id="pj_dokter">
       <label>Obat</label><select id="pj_kode"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
       <label>Jumlah</label><input id="pj_jumlah" type="number" value="1">
@@ -1990,11 +1990,11 @@ async function renderPenunjangTab(tab){
   } else if (tab === 'gizi') {
     const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
-      <label>No. RM</label><input id="pj_norm">
-      <label>Nama Pasien</label><input id="pj_nama">
-      <label>Ruang/Kelas</label><input id="pj_ruang">
+      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})">
+      <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
+      <label>Ruang/Kelas</label><input id="pj_ruang" placeholder="Terisi otomatis kalau pasien sedang rawat inap, atau isi manual">
       <label>Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
-      <label>Alergi/Pantangan</label><input id="pj_alergi">
+      <label>Alergi/Pantangan</label><input id="pj_alergi" placeholder="Terisi otomatis dari data pasien kalau ditemukan">
       <button class="btn" onclick="pjSubmit('gizi.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama})">Simpan Order Diet</button>
       <div class="section-title" style="margin-top:16px">Daftar Order Gizi</div>
       <div id="pjList"></div>`;
@@ -2151,6 +2151,51 @@ async function submitUbahStatusKamar(id){
   if(r.ok){ toast('Status diperbarui'); pageManajemenKamar(document.getElementById('main')); } else toast(r.msg || 'Gagal mengubah status');
 }
 
+/* ===== Cari pasien otomatis berdasarkan No. RM (Lab/Rad/Farmasi/Gizi) =====
+   Dibuat karena form-form ini dulu meminta Nama Pasien diketik ULANG manual
+   tanpa dicek ke data pasien sungguhan — kadang lupa diisi (nama kosong) atau
+   salah ketik. Sekarang begitu No. RM yang benar diketik, Nama Pasien terisi
+   otomatis & dikunci (tidak bisa diketik ulang) supaya datanya pasti benar
+   bersumber dari catatan pasien, bukan ketikan manual. Untuk Gizi, Alergi &
+   saran Ruang/Kelas ikut terisi otomatis kalau pasien sedang rawat inap. */
+async function cariPasienOtomatis(rmId, namaId, hintId, opt){
+  opt = opt || {};
+  const rm = val(rmId).trim();
+  const namaEl = document.getElementById(namaId);
+  const hintEl = hintId ? document.getElementById(hintId) : null;
+  const alergiEl = opt.alergiId ? document.getElementById(opt.alergiId) : null;
+  if(!rm){
+    if(namaEl){ namaEl.readOnly = false; namaEl.style.background = ""; }
+    if(alergiEl){ alergiEl.readOnly = false; alergiEl.style.background = ""; }
+    if(hintEl) hintEl.textContent = "";
+    return;
+  }
+  const hasil = await api('penunjang.cariPasien', {noRm: rm}, 'POST');
+  if(hasil && hasil.ditemukan){
+    if(namaEl){ namaEl.value = hasil.namaPasien; namaEl.readOnly = true; namaEl.style.background = "#f5f5f5"; }
+    let pesan = "✅ Pasien ditemukan: " + hasil.namaPasien;
+    if(alergiEl){
+      alergiEl.value = hasil.alergi || "Tidak ada";
+      alergiEl.readOnly = true; alergiEl.style.background = "#f5f5f5";
+    }
+    if(opt.ruangId){
+      const ruangEl = document.getElementById(opt.ruangId);
+      if(ruangEl){
+        if(hasil.sedangRawatInap){
+          ruangEl.value = (hasil.ruangan||"") + (hasil.kelas ? (" (Kelas "+hasil.kelas+")") : "") + (hasil.kodeBed ? (" — "+hasil.kodeBed) : "");
+          pesan += " — sedang rawat inap di " + (hasil.ruangan||"-");
+        } else {
+          ruangEl.value = "";
+        }
+      }
+    }
+    if(hintEl) hintEl.textContent = pesan;
+  } else {
+    if(namaEl){ namaEl.value = ""; namaEl.readOnly = false; namaEl.style.background = ""; }
+    if(alergiEl){ alergiEl.value = ""; alergiEl.readOnly = false; alergiEl.style.background = ""; }
+    if(hintEl) hintEl.textContent = rm.length >= 2 ? "⚠️ No. RM tidak ditemukan — pastikan sudah benar, atau daftarkan pasien dulu di menu Pendaftaran" : "";
+  }
+}
 async function pjSubmit(action, data){
   const r = await api(action, data, 'POST');
   if (r && (r.id || r.ok)) {
