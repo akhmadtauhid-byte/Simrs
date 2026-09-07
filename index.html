@@ -180,6 +180,7 @@ const NAV = [
   {id:"rekap", label:"Rekap Klaim", step:null},
   {id:"aturanba", label:"📋 Aturan BA 2024", step:null},
 {id:"penunjang", label:"🧪 Unit Penunjang", step:null},
+{id:"manajemenkamar", label:"🛏️ Manajemen Kamar", step:null},
 {id:"tarif", label:"💰 Master Tarif", step:null},
 {id:"ikp", label:"⚠️ Lapor Insiden (IKP)", step:null},
 {id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null},
@@ -208,7 +209,7 @@ const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal"], rekammedis:["rekammedis","cppt","asesmenawal"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"],
-  tarif:["tarif"], mutu:["dashboardmutu"]
+  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -227,6 +228,7 @@ const DAFTAR_MODUL = [
   {id:"gizi", label:"Unit Penunjang — Gizi"},
   {id:"cssd", label:"Unit Penunjang — CSSD"},
   {id:"linen", label:"Unit Penunjang — Linen"},
+  {id:"ranap", label:"Manajemen Tempat Tidur/Kamar"},
   {id:"tarif", label:"Master Tarif"},
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
@@ -794,7 +796,7 @@ function render(){
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
-    ikp: pageIKP, dashboardmutu: pageDashboardMutu
+    ikp: pageIKP, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -983,6 +985,7 @@ async function pageDashboard(el){
     <div class="card stat"><b>${r.totalPasienTerdaftar??0}</b><span>Total Pasien Terdaftar</span></div>
     <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.klaimBerpotensiRugi??0}</b><span>Klaim Berpotensi Rugi (billing &gt; prediksi CBG)</span></div>
     <div class="card stat"><b>${r.totalKlaimDiprediksi??0}</b><span>Total Klaim Diprediksi</span></div>
+    <div class="card stat"><b>${r.tempatTidurTotal ? (r.tempatTidurKosong??0)+"/"+r.tempatTidurTotal : "-"}</b><span>Tempat Tidur Kosong${!r.tempatTidurTotal ? " (belum ada data tempat tidur)" : ""}</span></div>
   `;
 }
 
@@ -1331,6 +1334,11 @@ async function pageRekamMedis(el){
   const d = window.__detail;
   const isRI = (d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan) !== "Rawat Jalan";
   const diagDokterAwal = d.kunjungan.diagnosaMedisDokter || d.kunjungan.DiagnosaMedisDokter || "";
+  let bedKosongOptions = "";
+  if(isRI){
+    const bedRows = await api('kamar.list', {}, 'GET');
+    bedKosongOptions = (bedRows||[]).filter(b=>b.status==='Kosong').map(b=>`<option value="${b.id}">${b.kodeBed} — ${b.ruangan}${b.kelas?(' (Kelas '+b.kelas+')'):''}</option>`).join("");
+  }
 
   el.innerHTML += `<div class="card" style="margin-bottom:14px">
     <div class="section-title">Diagnosa Klinis Dokter (bahasa medis)</div>
@@ -1349,10 +1357,18 @@ async function pageRekamMedis(el){
   <div class="grid cols2">
     ${isRI ? `<div class="card">
       <div class="section-title">Admisi Rawat Inap</div>
-      ${d.rawatInap ? `<div class="hint">Sudah diadmisi: Ruangan ${d.rawatInap.ruangan||d.rawatInap.Ruangan}, Kelas ${d.rawatInap.kelas||d.rawatInap.Kelas}</div>` : `
+      ${d.rawatInap ? `
+        <div class="hint">Sudah diadmisi: Ruangan ${d.rawatInap.ruangan||d.rawatInap.Ruangan}, Kelas ${d.rawatInap.kelas||d.rawatInap.Kelas}${(d.rawatInap.kodeBed) ? (', Tempat Tidur <b>'+d.rawatInap.kodeBed+'</b>') : ' — belum ditempatkan di tempat tidur tertentu'}</div>
+        <div style="margin-top:8px"><label>Pindah ke Tempat Tidur Lain (opsional)</label>
+        <select id="bedPindahId"><option value="">-- Pilih tempat tidur kosong --</option>${bedKosongOptions}</select>
+        <button class="btn sm" style="margin-top:6px" onclick="submitPindahKamar()">Pindahkan</button></div>
+        ${!bedKosongOptions ? `<p class="hint">Tidak ada tempat tidur kosong saat ini (atau belum ada data tempat tidur terdaftar) — kelola di menu "🛏️ Manajemen Kamar".</p>` : ""}
+      ` : `
       <div class="row"><div><label>Ruangan</label><input id="ruangan" placeholder="cth: Melati 2"></div>
         <div><label>Kelas Rawat</label><select id="kelas"><option value="1">Kelas 1</option><option value="2">Kelas 2</option><option value="3">Kelas 3</option></select></div></div>
-      <div class="row"><div><label>DPJP</label>
+      <label>Tempat Tidur (opsional — kalau dipilih, Ruangan/Kelas di atas otomatis mengikuti data tempat tidur ini)</label>
+      <select id="tempatTidurId"><option value="">-- Tanpa tempat tidur spesifik --</option>${bedKosongOptions}</select>
+      <div class="row" style="margin-top:8px"><div><label>DPJP</label>
         <select id="dpjpRIId" onchange="onPegawaiSelectChange('dpjpRIId','dpjpRIManual')"><option value="">Memuat daftar pegawai...</option></select>
         <input id="dpjpRIManual" style="display:none;margin-top:6px" placeholder="Ketik nama DPJP manual (kalau belum ada di daftar pegawai)"></div>
         <div><label>Cara Masuk</label><select id="caraMasuk"><option>Rujukan</option><option>IGD</option><option>Poliklinik</option></select></div></div>
@@ -1466,8 +1482,14 @@ async function submitPersetujuanTindakan(){
 }
 async function submitAdmisi(){
   const dpjpPilih = pegawaiPayload("dpjpRIId","dpjpRIManual");
-  const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjpId: dpjpPilih.id, dpjp: dpjpPilih.nama, caraMasuk:val("caraMasuk")}, "POST");
-  if(r.ok){ toast("Pasien diadmisi rawat inap"); render(); }
+  const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjpId: dpjpPilih.id, dpjp: dpjpPilih.nama, caraMasuk:val("caraMasuk"), tempatTidurId: val("tempatTidurId")}, "POST");
+  if(r.ok){ toast(r.msg || "Pasien diadmisi rawat inap"); render(); } else { toast(r.msg || "Gagal admisi rawat inap"); }
+}
+async function submitPindahKamar(){
+  const tempatTidurIdBaru = val("bedPindahId");
+  if(!tempatTidurIdBaru){ toast("Pilih tempat tidur tujuan dulu"); return; }
+  const r = await api("kamar.pindahkanPasien", {kunjunganId: state.activeKunjunganId, tempatTidurIdBaru}, "POST");
+  if(r.ok){ toast(r.msg || "Pasien dipindahkan"); render(); } else { toast(r.msg || "Gagal memindahkan pasien"); }
 }
 async function submitDiagnosa(){
   const r = await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
@@ -1966,6 +1988,7 @@ async function renderPenunjangTab(tab){
     const resepRows = await api('farmasi.listResep', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
   } else if (tab === 'gizi') {
+    const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
       <label>No. RM</label><input id="pj_norm">
       <label>Nama Pasien</label><input id="pj_nama">
@@ -1973,28 +1996,159 @@ async function renderPenunjangTab(tab){
       <label>Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
       <label>Alergi/Pantangan</label><input id="pj_alergi">
       <button class="btn" onclick="pjSubmit('gizi.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama})">Simpan Order Diet</button>
-      <div id="pjList" style="margin-top:14px"></div>`;
+      <div class="section-title" style="margin-top:16px">Daftar Order Gizi</div>
+      <div id="pjList"></div>`;
     const rows = await api('gizi.listAktif', {}, 'POST');
-    document.getElementById('pjList').innerHTML = pjTable(rows, ['Nama_Pasien','Ruang_Kelas','Jenis_Diet']);
+    document.getElementById('pjList').innerHTML = renderGiziList(rows, bolehProsesGizi);
   } else if (tab === 'cssd') {
+    const bolehProsesCssd = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('cssd');
     body.innerHTML = `
       <label>Unit Asal</label><input id="pj_unit">
       <label>Jenis Alat/Set</label><input id="pj_jenis">
       <label>Jumlah</label><input id="pj_jumlah" type="number">
       <button class="btn" onclick="pjSubmit('cssd.terimaAlat',{unitAsal:val('pj_unit'),jenisAlat:val('pj_jenis'),jumlah:Number(val('pj_jumlah'))||1,petugas:state.user.nama})">Simpan</button>
-      <div id="pjList" style="margin-top:14px"></div>`;
+      <div class="section-title" style="margin-top:16px">Daftar Alat CSSD</div>
+      <div id="pjList"></div>`;
     const rows = await api('cssd.listAktif', {}, 'POST');
-    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_CSSD','Unit_Asal','Jenis_Alat_Set','Status']);
+    document.getElementById('pjList').innerHTML = renderCssdList(rows, bolehProsesCssd);
   } else if (tab === 'linen') {
+    const bolehProsesLinen = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('linen');
     body.innerHTML = `
       <label>Unit Asal</label><input id="pj_unit">
       <label>Jenis Linen</label><input id="pj_jenis">
       <label>Jumlah Kotor</label><input id="pj_jumlah" type="number">
       <button class="btn" onclick="pjSubmit('linen.setorKotor',{unitAsal:val('pj_unit'),jenisLinen:val('pj_jenis'),jumlahKotor:Number(val('pj_jumlah'))||0,petugas:state.user.nama})">Simpan</button>
-      <div id="pjList" style="margin-top:14px"></div>`;
+      <div class="section-title" style="margin-top:16px">Daftar Linen Diproses</div>
+      <div id="pjList"></div>`;
     const rows = await api('linen.listProses', {}, 'POST');
-    document.getElementById('pjList').innerHTML = pjTable(rows, ['ID_Linen','Unit_Asal','Jenis_Linen','Jumlah_Kotor']);
+    document.getElementById('pjList').innerHTML = renderLinenList(rows, bolehProsesLinen);
   }
+}
+
+/* ===== Gizi: tandai sudah disajikan ===== */
+function renderGiziList(rows, bolehProses){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada order gizi</div>';
+  return rows.map(r => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Ruang_Kelas||"-"} — ${r.Jenis_Diet||"-"}</div>
+        <span class="badge ${r.Status==='Disajikan'?'ok':'muted'}">${r.Status||'Aktif'}</span>
+      </div>
+      ${r.Status==='Disajikan'
+        ? `<div class="hint" style="margin-top:6px">Disajikan oleh ${r.petugasSaji||"-"}, ${new Date(r.waktuDisajikan).toLocaleString('id-ID')}</div>`
+        : (bolehProses ? `<button class="btn sm" style="margin-top:6px" onclick="giziTandaiDisajikan('${r.id}')">🍽️ Tandai Sudah Disajikan</button>` : `<div class="hint" style="margin-top:6px">Menunggu disajikan</div>`)}
+    </div>`).join("");
+}
+async function giziTandaiDisajikan(id){
+  const r = await api('gizi.setDisajikan', {id, petugas: state.user.nama}, 'POST');
+  if(r.ok){ toast('Ditandai sudah disajikan'); renderPenunjangTab('gizi'); } else toast(r.msg || 'Gagal menyimpan');
+}
+
+/* ===== CSSD: alur bertahap Diterima -> Disterilkan -> Dikembalikan ===== */
+function renderCssdList(rows, bolehProses){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada data CSSD</div>';
+  const langkahBerikut = {Diterima:'Disterilkan', Disterilkan:'Dikembalikan'};
+  return rows.map(r => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Alat_Set||"-"} (${r.Jumlah||1})</div>
+        <span class="badge ${r.Status==='Dikembalikan'?'ok':'muted'}">${r.Status}</span>
+      </div>
+      <div class="hint" style="margin-top:4px">
+        ${r.waktuSteril ? `Disterilkan: ${new Date(r.waktuSteril).toLocaleString('id-ID')}. ` : ""}${r.waktuKembali ? `Dikembalikan: ${new Date(r.waktuKembali).toLocaleString('id-ID')} oleh ${r.petugasProses||"-"}` : ""}
+      </div>
+      ${(bolehProses && langkahBerikut[r.Status]) ? `<button class="btn sm" style="margin-top:6px" onclick="cssdLanjutStatus('${r.ID_CSSD}','${langkahBerikut[r.Status]}')">➡️ Tandai ${langkahBerikut[r.Status]}</button>` : ""}
+    </div>`).join("");
+}
+async function cssdLanjutStatus(id, statusBaru){
+  const r = await api('cssd.updateStatus', {id, statusBaru, petugas: state.user.nama}, 'POST');
+  if(r.ok){ toast('Status diperbarui: '+statusBaru); renderPenunjangTab('cssd'); } else toast(r.msg || 'Gagal memperbarui status');
+}
+
+/* ===== Linen: tandai bersih & dikembalikan ===== */
+function renderLinenList(rows, bolehProses){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada data linen</div>';
+  return rows.map(r => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Linen||"-"} (kotor: ${r.Jumlah_Kotor||0})</div>
+        <span class="badge ${r.Status==='Selesai'?'ok':'muted'}">${r.Status||'Proses'}</span>
+      </div>
+      ${r.Status==='Selesai'
+        ? `<div class="hint" style="margin-top:6px">Bersih &amp; dikembalikan: ${r.Jumlah_Bersih??0} — oleh ${r.petugasKembali||"-"}, ${new Date(r.waktuKembali).toLocaleString('id-ID')}</div>`
+        : (bolehProses ? `
+          <div class="row" style="margin-top:6px"><input id="linenBersih_${r.ID_Linen}" type="number" placeholder="Jumlah bersih">
+          <button class="btn sm" onclick="linenTandaiBersih('${r.ID_Linen}')">🧺 Tandai Bersih &amp; Dikembalikan</button></div>
+        ` : `<div class="hint" style="margin-top:6px">Masih diproses</div>`)}
+    </div>`).join("");
+}
+async function linenTandaiBersih(id){
+  const jumlahBersih = Number(val('linenBersih_'+id))||0;
+  const r = await api('linen.setBersih', {id, jumlahBersih, petugas: state.user.nama}, 'POST');
+  if(r.ok){ toast('Ditandai bersih & dikembalikan'); renderPenunjangTab('linen'); } else toast(r.msg || 'Gagal menyimpan');
+}
+
+/* ================== MANAJEMEN TEMPAT TIDUR / KAMAR ================== */
+async function pageManajemenKamar(el){
+  const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('ranap');
+  el.innerHTML = `<h1>🛏️ Manajemen Tempat Tidur / Kamar</h1><p class="sub">Ketersediaan tempat tidur rawat inap — semua staf yang login bisa melihat, hanya admin/modul "Manajemen Tempat Tidur/Kamar" yang bisa menambah &amp; mengubah status.</p>
+    <div class="grid cols4" id="kamarStats"></div>
+    <div class="section-title" style="margin-top:16px">Ketersediaan per Ruangan</div>
+    <div id="kamarPerRuangan"></div>
+    ${bolehKelola ? `
+    <div class="section-title" style="margin-top:20px">Tambah Tempat Tidur Baru</div>
+    <div class="card">
+      <div class="row"><input id="bedKode" placeholder="Kode (cth: MEL-01)"><input id="bedRuangan" placeholder="Ruangan (cth: Melati)"></div>
+      <div class="row" style="margin-top:6px">
+        <select id="bedKelas"><option value="">-- Kelas (opsional) --</option><option value="1">Kelas 1</option><option value="2">Kelas 2</option><option value="3">Kelas 3</option><option value="VIP">VIP</option></select>
+        <input id="bedKeterangan" placeholder="Keterangan (opsional)">
+      </div>
+      <button class="btn sm" style="margin-top:6px" onclick="submitTambahKamar()">Tambah</button>
+    </div>` : ""}
+    <div class="section-title" style="margin-top:20px">Daftar Tempat Tidur</div>
+    <div id="kamarList"></div>`;
+  await muatDataKamar(bolehKelola);
+}
+async function muatDataKamar(bolehKelola){
+  const [ket, rows] = await Promise.all([api('kamar.ketersediaan', {}, 'GET'), api('kamar.list', {}, 'GET')]);
+  document.getElementById('kamarStats').innerHTML = `
+    <div class="card stat"><b>${ket.total??0}</b><span>Total Tempat Tidur</span></div>
+    <div class="card stat"><b>${ket.kosong??0}</b><span>Kosong</span></div>
+    <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${ket.terisi??0}</b><span>Terisi</span></div>
+    <div class="card stat"><b>${(ket.dibersihkan??0)+(ket.perbaikan??0)}</b><span>Dibersihkan / Perbaikan</span></div>`;
+  document.getElementById('kamarPerRuangan').innerHTML = pjTable((ket.perRuangan||[]).map(x=>({Ruangan:x.ruangan, Total:x.total, Kosong:x.kosong, Terisi:x.terisi})), ['Ruangan','Total','Kosong','Terisi']);
+  document.getElementById('kamarList').innerHTML = renderKamarList(rows, bolehKelola);
+}
+function renderKamarList(rows, bolehKelola){
+  if(!rows || !rows.length) return `<div class="empty">Belum ada tempat tidur terdaftar. ${bolehKelola ? 'Tambahkan lewat form di atas.' : 'Hubungi admin untuk mendaftarkan tempat tidur.'}</div>`;
+  const kelasBadge = {Kosong:'ok', Terisi:'danger', Dibersihkan:'warn', Perbaikan:'warn'};
+  return rows.map(r => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${r.kodeBed}</b> — ${r.ruangan}${r.kelas?(' (Kelas '+r.kelas+')'):''}</div>
+        <span class="badge ${kelasBadge[r.status]||'muted'}">${r.status}</span>
+      </div>
+      ${r.pasien ? `<div class="hint" style="margin-top:4px">Pasien: ${r.pasien.nama} (RM ${r.pasien.noRm}) — DPJP ${r.pasien.dpjp||'-'}, masuk ${new Date(r.pasien.tglMasuk).toLocaleDateString('id-ID')}</div>` : ""}
+      ${r.keterangan ? `<div class="hint">${r.keterangan}</div>` : ""}
+      ${(bolehKelola && r.status !== 'Terisi') ? `
+        <div class="row" style="margin-top:6px">
+          <select id="bedStatusBaru_${r.id}">
+            <option value="Kosong" ${r.status==='Kosong'?'selected':''}>Kosong</option>
+            <option value="Dibersihkan" ${r.status==='Dibersihkan'?'selected':''}>Dibersihkan</option>
+            <option value="Perbaikan" ${r.status==='Perbaikan'?'selected':''}>Perbaikan</option>
+          </select>
+          <button class="btn sm" onclick="submitUbahStatusKamar('${r.id}')">Ubah Status</button>
+        </div>` : ""}
+    </div>`).join("");
+}
+async function submitTambahKamar(){
+  const r = await api('kamar.tambah', {kodeBed:val('bedKode'), ruangan:val('bedRuangan'), kelas:val('bedKelas'), keterangan:val('bedKeterangan')}, 'POST');
+  if(r.ok){ toast('Tempat tidur ditambahkan'); pageManajemenKamar(document.getElementById('main')); } else toast(r.msg || 'Gagal menambah tempat tidur');
+}
+async function submitUbahStatusKamar(id){
+  const statusBaru = val('bedStatusBaru_'+id);
+  const r = await api('kamar.setStatus', {id, status: statusBaru}, 'POST');
+  if(r.ok){ toast('Status diperbarui'); pageManajemenKamar(document.getElementById('main')); } else toast(r.msg || 'Gagal mengubah status');
 }
 
 async function pjSubmit(action, data){
