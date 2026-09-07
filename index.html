@@ -1933,7 +1933,10 @@ async function renderPenunjangTab(tab){
     const label = tab === 'lab' ? 'Lab' : 'Radiologi';
     body.innerHTML = `
       <div class="section-title">Buat Order ${label} Baru</div>
-      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+      <div style="position:relative;"><label>No. RM</label>
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint')" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+        <div id="pj_saranPasien" class="suggest-box"></div>
+      </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Unit Asal</label><input id="pj_unit">
       <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="${tab==='lab'?'Darah Rutin, dll':'Rontgen Thorax, dll'}">
@@ -1951,7 +1954,10 @@ async function renderPenunjangTab(tab){
     const obatOptions = (obatRows||[]).map(o=>`<option value="${o.kode}">${o.namaObat} (stok ${o.stok}${o.satuan?(' '+o.satuan):''})</option>`).join("");
     body.innerHTML = `
       <div class="section-title">Buat Resep Baru</div>
-      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+      <div style="position:relative;"><label>No. RM</label>
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint')" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+        <div id="pj_saranPasien" class="suggest-box"></div>
+      </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Dokter</label><input id="pj_dokter">
       <label>Obat</label><select id="pj_kode"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
@@ -1990,7 +1996,10 @@ async function renderPenunjangTab(tab){
   } else if (tab === 'gizi') {
     const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
-      <label>No. RM</label><input id="pj_norm" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})">
+      <div style="position:relative;"><label>No. RM</label>
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})">
+        <div id="pj_saranPasien" class="suggest-box"></div>
+      </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Ruang/Kelas</label><input id="pj_ruang" placeholder="Terisi otomatis kalau pasien sedang rawat inap, atau isi manual">
       <label>Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
@@ -2149,6 +2158,34 @@ async function submitUbahStatusKamar(id){
   const statusBaru = val('bedStatusBaru_'+id);
   const r = await api('kamar.setStatus', {id, status: statusBaru}, 'POST');
   if(r.ok){ toast('Status diperbarui'); pageManajemenKamar(document.getElementById('main')); } else toast(r.msg || 'Gagal mengubah status');
+}
+
+/* ===== Saran pasien sambil mengetik (dropdown) untuk kolom No. RM di Unit
+   Penunjang — supaya tidak perlu buka menu lain dulu untuk melihat No. RM
+   pasien. Ketik No. RM ATAU nama pasien, muncul daftar untuk dipilih. ===== */
+let pasienSaranDebounce;
+function cariPasienSaran(rmId, boxId, namaId, hintId, opt){
+  clearTimeout(pasienSaranDebounce);
+  const q = val(rmId).trim();
+  const box = document.getElementById(boxId);
+  if(!box) return;
+  if(q.length < 2){ box.classList.remove("show"); box.innerHTML = ""; return; }
+  pasienSaranDebounce = setTimeout(async ()=>{
+    const hasil = await api("searchPasien", {q}, "POST");
+    if(!hasil || !hasil.length){
+      box.innerHTML = `<div class="suggest-item" style="color:var(--muted)">Tidak ada pasien cocok — pastikan sudah terdaftar di menu Pendaftaran</div>`;
+      box.classList.add("show");
+      return;
+    }
+    box.innerHTML = hasil.map(p => `<div class="suggest-item" onclick='pilihPasienPenunjang(${JSON.stringify(rmId)}, ${JSON.stringify(boxId)}, ${JSON.stringify(namaId)}, ${JSON.stringify(hintId)}, ${JSON.stringify(opt||{})}, ${JSON.stringify(p.RM)})'><b>${p.RM}</b> — ${p.Nama}${p.NoHP ? ` <span class="hint">(${p.NoHP})</span>` : ""}</div>`).join("");
+    box.classList.add("show");
+  }, 250);
+}
+async function pilihPasienPenunjang(rmId, boxId, namaId, hintId, opt, rm){
+  document.getElementById(boxId).classList.remove("show");
+  document.getElementById(boxId).innerHTML = "";
+  document.getElementById(rmId).value = rm;
+  await cariPasienOtomatis(rmId, namaId, hintId, opt);
 }
 
 /* ===== Cari pasien otomatis berdasarkan No. RM (Lab/Rad/Farmasi/Gizi) =====
