@@ -478,26 +478,43 @@ function pegawaiPayload(selectId, manualId){
 async function pageKelolaPegawai(){
   const m = document.getElementById("main");
   m.innerHTML = `<h1>Kelola Pegawai</h1>
-    <p class="sub">Daftar induk nama pegawai — termasuk dokter/petugas yang <b>tidak perlu akun login SIMRS sama sekali</b>. Daftar ini dipakai sebagai pilihan "Pelaksana Tindakan" & "DPJP" di seluruh sistem, supaya jumlah tindakan tiap orang bisa dihitung otomatis & akurat lewat menu "Rekap Pegawai" (dasar hitung jasa medis/kinerja).</p>
+    <p class="sub">Daftar induk nama pegawai — termasuk dokter/petugas yang <b>tidak perlu akun login SIMRS sama sekali</b>. Daftar ini dipakai sebagai pilihan "Pelaksana Tindakan" & "DPJP" di seluruh sistem, supaya jumlah tindakan tiap orang bisa dihitung otomatis & akurat lewat menu "Rekap Pegawai" (dasar hitung jasa medis/kinerja). Nomor & masa berlaku STR/SIP juga dipantau di sini — badge merah/kuning muncul otomatis kalau sudah/akan kadaluarsa.</p>
     <button class="btn ghost" style="margin-bottom:14px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
     <div class="card" style="margin-bottom:16px">
       <div class="section-title">Tambah Pegawai Baru</div>
       <div class="row"><div><label>Nama Lengkap</label><input id="pegNamaBaru" placeholder="cth: dr. Ahmad Yani, Sp.PD"></div>
         <div><label>Jabatan</label><input id="pegJabatanBaru" placeholder="cth: Dokter Spesialis Penyakit Dalam"></div></div>
+      <div class="row">
+        <div><label>No. STR</label><input id="pegStrNomorBaru" placeholder="Nomor STR"></div>
+        <div><label>STR Berlaku Sampai</label><input type="date" id="pegStrTglBaru"></div>
+        <div><label>No. SIP</label><input id="pegSipNomorBaru" placeholder="Nomor SIP"></div>
+        <div><label>SIP Berlaku Sampai</label><input type="date" id="pegSipTglBaru"></div>
+      </div>
       <button class="btn" style="margin-top:10px" onclick="tambahPegawaiBaru()">Tambah Pegawai</button>
     </div>
     <div id="pegawaiBody" class="empty">Memuat...</div>`;
   await muatKelolaPegawai();
+}
+function badgeMasaBerlaku(status){
+  if(!status) return "-";
+  const cls = status==="Kadaluarsa" ? "danger" : (status==="Akan Habis" ? "warn" : "ok");
+  return `<span class="badge ${cls}">${status}</span>`;
 }
 async function muatKelolaPegawai(){
   const body = document.getElementById("pegawaiBody");
   const r = await api("kelolaPegawai.list", {}, "GET");
   if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat data"}</div>`; return; }
   if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada pegawai terdaftar.</div>`; return; }
-  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>Status</th><th></th></tr>
+  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>No. STR</th><th>STR Berlaku Sampai</th><th>Status STR</th><th>No. SIP</th><th>SIP Berlaku Sampai</th><th>Status SIP</th><th>Status</th><th></th></tr>
     ${r.data.map(p => `<tr>
-      <td><input id="pn_${p.id}" value="${(p.nama||'').replace(/"/g,'&quot;')}" style="min-width:180px"></td>
-      <td><input id="pj_${p.id}" value="${(p.jabatan||'').replace(/"/g,'&quot;')}" style="min-width:160px"></td>
+      <td><input id="pn_${p.id}" value="${(p.nama||'').replace(/"/g,'&quot;')}" style="min-width:160px"></td>
+      <td><input id="pj_${p.id}" value="${(p.jabatan||'').replace(/"/g,'&quot;')}" style="min-width:140px"></td>
+      <td><input id="pstrn_${p.id}" value="${(p.strNomor||'').replace(/"/g,'&quot;')}" style="min-width:100px"></td>
+      <td><input type="date" id="pstrt_${p.id}" value="${p.strBerlakuSampai||''}"></td>
+      <td>${badgeMasaBerlaku(p.strStatus)}</td>
+      <td><input id="psipn_${p.id}" value="${(p.sipNomor||'').replace(/"/g,'&quot;')}" style="min-width:100px"></td>
+      <td><input type="date" id="psipt_${p.id}" value="${p.sipBerlakuSampai||''}"></td>
+      <td>${badgeMasaBerlaku(p.sipStatus)}</td>
       <td>${p.aktif ? '<span class="badge ok">Aktif</span>' : '<span class="badge danger">Nonaktif</span>'}</td>
       <td style="white-space:nowrap">
         <button class="btn sm ghost" onclick="simpanPegawai('${p.id}')">Simpan</button>
@@ -505,15 +522,23 @@ async function muatKelolaPegawai(){
       </td>
     </tr>`).join("")}
     </table>
-    <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem.</p>`;
+    <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem. Status STR/SIP: "Akan Habis" = kurang dari 60 hari lagi, "Kadaluarsa" = sudah lewat tanggal berlaku.</p>`;
 }
 async function tambahPegawaiBaru(){
   const nama = val("pegNamaBaru");
   if(!nama){ toast("Nama pegawai wajib diisi"); return; }
-  const r = await api("kelolaPegawai.simpan", {nama, jabatan: val("pegJabatanBaru")}, "POST");
+  const r = await api("kelolaPegawai.simpan", {
+    nama, jabatan: val("pegJabatanBaru"),
+    strNomor: val("pegStrNomorBaru"), strBerlakuSampai: val("pegStrTglBaru"),
+    sipNomor: val("pegSipNomorBaru"), sipBerlakuSampai: val("pegSipTglBaru")
+  }, "POST");
   if(r.ok){
     document.getElementById("pegNamaBaru").value = "";
     document.getElementById("pegJabatanBaru").value = "";
+    document.getElementById("pegStrNomorBaru").value = "";
+    document.getElementById("pegStrTglBaru").value = "";
+    document.getElementById("pegSipNomorBaru").value = "";
+    document.getElementById("pegSipTglBaru").value = "";
     state.pegawaiCache = null;
     toast("Pegawai ditambahkan");
     await muatKelolaPegawai();
@@ -522,9 +547,14 @@ async function tambahPegawaiBaru(){
 async function simpanPegawai(id){
   const nama = document.getElementById("pn_"+id).value.trim();
   const jabatan = document.getElementById("pj_"+id).value.trim();
-  const r = await api("kelolaPegawai.simpan", {id, nama, jabatan}, "POST");
+  const strNomor = document.getElementById("pstrn_"+id).value.trim();
+  const strBerlakuSampai = document.getElementById("pstrt_"+id).value;
+  const sipNomor = document.getElementById("psipn_"+id).value.trim();
+  const sipBerlakuSampai = document.getElementById("psipt_"+id).value;
+  const r = await api("kelolaPegawai.simpan", {id, nama, jabatan, strNomor, strBerlakuSampai, sipNomor, sipBerlakuSampai}, "POST");
   state.pegawaiCache = null;
   toast(r.ok ? "Data pegawai disimpan" : (r.msg || "Gagal menyimpan"));
+  if(r.ok) await muatKelolaPegawai();
 }
 async function setAktifPegawai(id, aktif){
   const r = await api("kelolaPegawai.setAktif", {id, aktif}, "POST");
@@ -685,7 +715,22 @@ function localApi(action, d){
       L.kunjungan.push(k);
       return {ok:true, kunjunganId:id, data:k};
     }
-    case "getKunjunganAktif": return L.kunjungan.filter(k=>k.Status==="Aktif");
+    case "getKunjunganAktif": {
+      let rows = L.kunjungan.filter(k=>k.Status==="Aktif");
+      if(d && d.jenisKunjungan) rows = rows.filter(k=>(k.jenisKunjungan||k.JenisKunjungan)===d.jenisKunjungan);
+      if(d && d.q){
+        const q = d.q.toLowerCase();
+        rows = rows.filter(k=>{
+          const pasien = L.pasien.find(p=>p.RM===k.rm||p.RM===k.RM);
+          const nama = (pasien&&pasien.nama)||"";
+          return (k.rm||k.RM||"").toLowerCase().includes(q) || nama.toLowerCase().includes(q) || (k.dpjp||k.DPJP||"").toLowerCase().includes(q);
+        });
+      }
+      return rows.map(k=>{
+        const pasien = L.pasien.find(p=>p.RM===k.rm||p.RM===k.RM);
+        return {...k, nama: pasien&&pasien.nama, Nama: pasien&&pasien.nama};
+      });
+    }
     case "getKunjunganDetail": {
       const k = L.kunjungan.find(x=>x.KunjunganID===d.id);
       if(!k) return {ok:false, msg:"Tidak ditemukan"};
@@ -976,7 +1021,9 @@ async function submitKeputusan(igdId){
 }
 
 async function pageDashboard(el){
-  el.innerHTML = `<h1>Dashboard</h1><p class="sub">Ringkasan operasional hari ini</p><div class="grid cols4" id="stats"></div>`;
+  el.innerHTML = `<h1>Dashboard</h1><p class="sub">Ringkasan operasional hari ini</p><div class="grid cols4" id="stats"></div>
+    <div class="section-title" style="margin-top:18px">⏰ Pengingat Reasesmen (Risiko Jatuh &amp; EWS)</div>
+    <div id="reasesmenBody" class="empty">Memuat...</div>`;
   const r = await api("getDashboard", {}, "GET");
   document.getElementById("stats").innerHTML = `
     <div class="card stat"><b>${r.kunjunganHariIni??0}</b><span>Kunjungan Hari Ini</span></div>
@@ -987,6 +1034,21 @@ async function pageDashboard(el){
     <div class="card stat"><b>${r.totalKlaimDiprediksi??0}</b><span>Total Klaim Diprediksi</span></div>
     <div class="card stat"><b>${r.tempatTidurTotal ? (r.tempatTidurKosong??0)+"/"+r.tempatTidurTotal : "-"}</b><span>Tempat Tidur Kosong${!r.tempatTidurTotal ? " (belum ada data tempat tidur)" : ""}</span></div>
   `;
+  await muatReasesmenDashboard();
+}
+async function muatReasesmenDashboard(){
+  const box = document.getElementById("reasesmenBody");
+  const r = await api("reasesmen.daftar", {}, "GET");
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">Gagal memuat pengingat reasesmen.</div>`; return; }
+  if(!r.data.length){ box.innerHTML = `<div class="empty">Tidak ada pasien yang perlu direasesmen saat ini.</div>`; return; }
+  box.innerHTML = `<table><tr><th>RM</th><th>Nama Pasien</th><th>Kunjungan</th><th>Jenis</th><th>Kategori</th><th>Jam Sejak Dinilai</th><th>Status</th></tr>
+    ${r.data.map(x=>`<tr${x.lewatWaktu?' style="color:var(--red)"':''}>
+      <td>${x.noRm}</td><td>${x.namaPasien}</td><td>${x.kunjunganId}</td><td>${x.jenis}</td>
+      <td><span class="badge ${x.kategori==='Tinggi'?'danger':'warn'}">${x.kategori}</span></td>
+      <td>${x.jamSejakDinilai} jam (ambang ${x.ambangJam} jam)</td>
+      <td>${x.lewatWaktu ? '⚠️ Lewat Waktu' : 'Segera'}</td>
+    </tr>`).join("")}
+  </table>`;
 }
 
 // ================== GANTI SELURUH pagePendaftaran + submitPasienBaru + submitKunjungan DENGAN INI ==================
@@ -1207,13 +1269,31 @@ async function searchICD9API(q){
 }
 
 async function pageKunjungan(el){
-  el.innerHTML = `<h1>Kunjungan Aktif</h1><p class="sub">Langkah 2 — pilih kunjungan untuk lanjut ke rekam medis / rawat inap</p><div id="list"></div>`;
-  const rows = await api("getKunjunganAktif", {}, "GET");
-  if(!rows.length){ document.getElementById("list").innerHTML = `<div class="card empty">Belum ada kunjungan aktif. Buat di menu Pendaftaran.</div>`; return; }
-  document.getElementById("list").innerHTML = `<div class="card"><table>
-    <tr><th>ID</th><th>RM</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th></th></tr>
+  el.innerHTML = `<h1>Kunjungan Aktif</h1><p class="sub">Langkah 2 — pilih kunjungan untuk lanjut ke rekam medis / rawat inap</p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Cari (No. RM / Nama / DPJP)</label><input id="kjQ" oninput="debounceMuatKunjungan()" placeholder="Ketik untuk mencari..."></div>
+        <div><label>Jenis Kunjungan</label><select id="kjJenis" onchange="muatKunjunganAktif()">
+          <option value="">Semua Jenis</option><option>Rawat Jalan</option><option>Rawat Inap</option><option>IGD</option>
+        </select></div>
+      </div>
+    </div>
+    <div id="list"></div>`;
+  await muatKunjunganAktif();
+}
+let _kjDebounce;
+function debounceMuatKunjungan(){
+  clearTimeout(_kjDebounce);
+  _kjDebounce = setTimeout(muatKunjunganAktif, 350);
+}
+async function muatKunjunganAktif(){
+  const rows = await api("getKunjunganAktif", {q: val("kjQ"), jenisKunjungan: val("kjJenis")}, "GET");
+  const list = document.getElementById("list");
+  if(!rows.length){ list.innerHTML = `<div class="card empty">Tidak ada kunjungan aktif yang cocok. Buat kunjungan baru di menu Pendaftaran, atau ubah kata kunci/filter di atas.</div>`; return; }
+  list.innerHTML = `<div class="card"><table>
+    <tr><th>ID</th><th>RM</th><th>Nama</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th></th></tr>
     ${rows.map(k=>`<tr>
-      <td>${k.KunjunganID}</td><td>${k.rm||k.RM}</td><td>${k.jenisKunjungan||k.JenisKunjungan}</td>
+      <td>${k.KunjunganID}</td><td>${k.rm||k.RM}</td><td>${k.nama||k.Nama||"-"}</td><td>${k.jenisKunjungan||k.JenisKunjungan}</td>
       <td>${k.poliRuangan||k.PoliRuangan||"-"}</td><td>${k.dpjp||k.DPJP||"-"}</td>
       <td><span class="badge ok">${k.Status}</span></td>
       <td><button class="btn sm" onclick="pilihKunjungan('${k.KunjunganID}')">Pilih →</button></td>
@@ -1808,15 +1888,18 @@ async function pagePulang(el){
 async function submitPulang(){
   const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar"), kondisiPulang:val("kondisiPulang"), instruksiPulang:val("instruksiPulang")}, "POST");
   if(r.ok){
-    toast("Pasien berhasil diproses pulang");
+    toast(r.msg || "Pasien berhasil diproses pulang");
     const k = r.prediksiINACBG;
     document.getElementById("resumeHasil").innerHTML = `<div class="cbg-result">
       <b>✅ Resume Selesai</b><br>
       Kode CBG final: <b>${k.KodeCBGPrediksi}</b> — Rp${Number(k.TarifPrediksi).toLocaleString('id-ID')}<br>
       Total Billing RS: Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}
     </div>
+    ${r.msg ? `<p class="hint">${r.msg}</p>` : ""}
     <button class="btn ghost" style="margin-top:10px" onclick="tampilkanCetak('${state.activeKunjunganId}')">🖨️ Tampilkan Resume Medis & Kuitansi</button>
     <div id="areaCetak" style="margin-top:14px"></div>`;
+  } else {
+    toast(r.msg || "Gagal memproses pulang");
   }
 }
 
@@ -2464,7 +2547,30 @@ async function pageDashboardMutu(el){
   <div class="grid cols3">
     ${['KNC','KTC','KTD','KPC','Sentinel'].map(j=>`<div class="card stat"><b>${insiden[j]||0}</b><span>${j}</span></div>`).join("")}
   </div>
-  <p class="hint" style="margin-top:12px">💡 Lihat detail tiap laporan insiden di menu "⚠️ Lapor Insiden (IKP)".</p>`;
+  <p class="hint" style="margin-top:12px">💡 Lihat detail tiap laporan insiden di menu "⚠️ Lapor Insiden (IKP)". Daftar pasien yang perlu direasesmen ada di halaman Dashboard utama.</p>
+  ${state.user && state.user.role==="admin" ? `<div class="card" style="margin-top:16px">
+    <div class="section-title">Pengaturan Interval Reasesmen (khusus admin)</div>
+    <p class="hint">Jam maksimal sebelum pasien dengan kategori ini dianggap perlu dinilai ulang. Sesuaikan dengan kebijakan Komite Mutu/PMKP rumah sakit — nilai bawaan di sini hanya titik awal.</p>
+    <div id="reasesmenPengaturanBody">Memuat...</div>
+  </div>` : ""}`;
+  if(state.user && state.user.role==="admin") await muatPengaturanReasesmen();
+}
+async function muatPengaturanReasesmen(){
+  const box = document.getElementById("reasesmenPengaturanBody");
+  const r = await api("reasesmen.pengaturanList", {}, "GET");
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||"Gagal memuat pengaturan"}</div>`; return; }
+  box.innerHTML = `<table><tr><th>Pengaturan</th><th>Interval (jam)</th><th></th></tr>
+    ${r.data.map(x=>`<tr>
+      <td>${x.keterangan||x.kunci}</td>
+      <td><input id="ri_${x.kunci}" type="number" min="1" value="${x.intervalJam}" style="width:90px"></td>
+      <td><button class="btn sm ghost" onclick="simpanPengaturanReasesmen('${x.kunci}')">Simpan</button></td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function simpanPengaturanReasesmen(kunci){
+  const interval = Number(document.getElementById("ri_"+kunci).value);
+  const r = await api("reasesmen.pengaturanSimpan", {kunci, intervalJam: interval}, "POST");
+  toast(r.ok ? "Pengaturan disimpan" : (r.msg || "Gagal menyimpan"));
 }
 
 /* ================== MASTER TARIF ================== */
@@ -2491,10 +2597,12 @@ async function renderTarifTab(tab){
       <label>Tarif Visite Umum</label><input id="tf_visu" type="number">
       <label>Tarif Visite Spesialis</label><input id="tf_viss" type="number">
       <label>Tarif Asuhan Keperawatan</label><input id="tf_asuhan" type="number">
-      <button class="btn" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0},'inap')">Simpan</button>
+      <label>Kelas Rawat Inap (untuk Billing otomatis)</label><input id="tf_kelasri" placeholder="Isi SAMA PERSIS dengan kolom Kelas di Rawat Inap/Tempat Tidur, cth: 1">
+      <p class="hint">Kolom ini menghubungkan baris tarif ini ke kolom "Kelas" yang dipakai di Admisi Rawat Inap/Manajemen Kamar (cth: "1", "2", "3") — supaya sistem tahu tarif kamar/hari mana yang harus dipakai saat menambahkan item Billing "Kamar" otomatis waktu pasien pulang. Kosongkan kalau kelas ini belum mau dipakai untuk fitur otomatis ini.</p>
+      <button class="btn" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0,kelasRawatInap:val('tf_kelasri')},'inap')">Simpan</button>
       <div id="tfList" style="margin-top:14px"></div>`;
     const rows = await api('tarif.listRawatInap', {}, 'POST');
-    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Kelas','Nama_Kelas','Tarif_Kamar_Per_Hari','Tarif_Visite_Dokter_Umum','Tarif_Visite_Dokter_Spesialis']);
+    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Kelas','Nama_Kelas','Tarif_Kamar_Per_Hari','Tarif_Visite_Dokter_Umum','Tarif_Visite_Dokter_Spesialis','Kelas_Rawat_Inap']);
   } else if (tab === 'jalan') {
     body.innerHTML = `
       <label>Kode Poli</label><input id="tf_kode">
