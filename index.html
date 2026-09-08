@@ -86,6 +86,7 @@
   .flag-item{padding:8px 10px;border-radius:7px;font-size:12.5px;margin-bottom:6px;}
   .flag-item.warn{background:var(--amber-lt);color:#7a4d16;}
   .flag-item.danger{background:var(--red-lt);color:var(--red);}
+  .flag-item.ok{background:var(--teal-lt);color:var(--teal-dk);}
   .config-note{background:var(--amber-lt);border:1px solid var(--amber);color:#7a4d16;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px;}
   .suggest-box{position:absolute;z-index:20;background:#fff;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow-y:auto;width:100%;box-shadow:0 6px 18px rgba(0,0,0,.1);display:none;}
   .suggest-box.show{display:block;}
@@ -187,6 +188,7 @@ const NAV = [
 {id:"keluhan", label:"💬 Keluhan & Kepuasan Pasien", step:null},
 {id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null},
 {id:"suratketerangan", label:"📄 Surat Keterangan", step:null},
+{id:"kamaroperasi", label:"🔪 Kamar Operasi", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -199,7 +201,7 @@ const ROLE_ACCESS = {
   // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
   // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
-  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan"],
+  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi"],
   perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan"],
@@ -212,7 +214,7 @@ const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
-  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"]
+  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"], ok:["kamaroperasi"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -235,6 +237,7 @@ const DAFTAR_MODUL = [
   {id:"ranap", label:"Manajemen Tempat Tidur/Kamar"},
   {id:"tarif", label:"Master Tarif"},
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
+  {id:"ok", label:"Kamar Operasi (jadwal operasi + checklist keselamatan operasi)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -959,7 +962,7 @@ function render(){
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
-    suratketerangan: pageSuratKeterangan
+    suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1209,6 +1212,7 @@ async function pagePendaftaran(el){
         <p class="hint">Kosongkan kalau bukan pasien BPJS atau SEP belum terbit — bisa diisi/diubah menyusul dari kartu info pasien setelah kunjungan dibuat.</p>
         <div style="margin-top:12px"><button class="btn" onclick="submitKunjungan()">Buat Kunjungan</button></div>
         <div class="hint" id="hasilKunjungan"></div>
+        <div id="areaPersetujuanUmum"></div>
         <div id="areaRiwayatPasien"></div>
       </div>
     </div>`;
@@ -1339,9 +1343,46 @@ async function submitKunjungan(){
        Nomor Antrian: <span style="display:inline-block;background:#0f4c5c;color:#fff;padding:4px 12px;border-radius:6px;font-family:monospace;font-size:18px">${r.noAntrian}</span>`;
     state.activeKunjunganId = r.kunjunganId;
     toast("Kunjungan dibuat - No. Antrian " + r.noAntrian);
+    renderFormPersetujuanUmum(r.kunjunganId);
   } else {
     toast(r.msg || "Gagal membuat kunjungan");
   }
+}
+
+/* ============ PERSETUJUAN UMUM (GENERAL CONSENT) ============
+   Dokumen legal berbeda dari Persetujuan Tindakan (yang khusus per tindakan
+   medis) — persetujuan umum rawat + pelepasan informasi medis ke penjamin,
+   diambil SEKALI per kunjungan begitu kunjungan baru dibuat. Setelah
+   tersimpan tidak bisa diubah/dihapus, pola sama seperti dokumen legal lain. */
+function renderFormPersetujuanUmum(kunjunganId){
+  const box = document.getElementById("areaPersetujuanUmum");
+  if(!box) return;
+  box.innerHTML = `<div class="card" style="margin-top:10px;border-top:3px solid var(--teal-dk)">
+    <div class="section-title">📝 Persetujuan Umum (General Consent)</div>
+    <p class="hint">Wajib diambil sekali saat pendaftaran — persetujuan umum rawat &amp; persetujuan pelepasan informasi medis ke penjamin/pihak yang ditunjuk. Berbeda dari Persetujuan Tindakan Kedokteran (yang khusus per tindakan medis, diambil menyusul).</p>
+    <label>Nama yang Menandatangani</label><input id="puNama" placeholder="cth: nama pasien sendiri, atau wali/keluarga">
+    <label>Hubungan dengan Pasien</label>
+    <select id="puHubungan"><option>Diri Sendiri</option><option>Suami/Istri</option><option>Orang Tua</option><option>Anak</option><option>Wali</option><option>Lainnya</option></select>
+    <label>Pihak yang Boleh Diberi Informasi Medis (opsional)</label><input id="puPihakInformasi" placeholder="cth: Suami — Budi Hartono">
+    <div style="margin:8px 0"><label style="display:flex;align-items:center;gap:6px;font-weight:normal"><input type="checkbox" id="puSetujuPenjamin" checked> Setuju pelepasan informasi medis ke pihak penjamin (BPJS/asuransi) untuk keperluan klaim</label></div>
+    <label>Catatan (opsional)</label><textarea id="puCatatan"></textarea>
+    <button class="btn" style="margin-top:8px" onclick="submitPersetujuanUmum('${kunjunganId}')">Simpan Persetujuan Umum</button>
+    <div class="hint" id="hasilPersetujuanUmum" style="margin-top:8px"></div>
+  </div>`;
+}
+async function submitPersetujuanUmum(kunjunganId){
+  if(!val("puNama")){ toast("Nama yang menandatangani wajib diisi"); return; }
+  const r = await api("persetujuanUmum.catat", {
+    kunjunganId, namaYangMenandatangani: val("puNama"), hubunganDenganPasien: val("puHubungan"),
+    pihakBolehDiberiInformasi: val("puPihakInformasi"),
+    setujuPelepasanInformasiPenjamin: document.getElementById("puSetujuPenjamin").checked,
+    catatan: val("puCatatan")
+  }, "POST");
+  if(r.ok){
+    toast("Persetujuan Umum tersimpan");
+    document.getElementById("hasilPersetujuanUmum").innerHTML = `✅ Persetujuan Umum tersimpan.`;
+    document.getElementById("puNama").disabled = true;
+  } else toast(r.msg || "Gagal menyimpan Persetujuan Umum");
 }
 
 function val(id){ return document.getElementById(id).value.trim(); }
@@ -1441,6 +1482,7 @@ async function patientStrip(kunjunganId){
   const jatuhBaris = kategoriJatuh ? `<div>⚠️ Risiko Jatuh: <span class="badge ${jatuhBadgeClass}">${kategoriJatuh}</span></div>` : "";
   const bolehSep = !DEMO_MODE && state.user && (["admin","pendaftaran","rekam_medis","verifikator"].includes(state.user.role) || ["pendaftaran","rekammedis","igd","pulang"].some(m=>(state.user.modul||[]).includes(m)));
   const sepBaris = `<div>SEP BPJS: <b>${d.kunjungan.noSep || "-"}</b>${bolehSep ? ` <button class="btn sm ghost" onclick="promptEditNoSep('${kunjunganId}','${d.kunjungan.noSep||""}')">✏️ Isi/Ubah</button>` : ""}</div>`;
+  const puBaris = `<div>Persetujuan Umum: ${d.persetujuanUmum ? `<span class="badge ok">✔️ Sudah</span>` : `<span class="badge warn">⚠️ Belum</span>`}</div>`;
   return `<div class="patient-strip">
     <div><b>${p.nama||p.Nama||"-"}</b> · RM ${p.RM||"-"}</div>
     <div>${d.kunjungan.jenisKunjungan||d.kunjungan.JenisKunjungan}</div>
@@ -1449,6 +1491,7 @@ async function patientStrip(kunjunganId){
     ${p.alergi||p.Alergi ? `<div>🚫 Alergi: <b>${p.alergi||p.Alergi}</b></div>` : ""}
     ${jatuhBaris}
     ${sepBaris}
+    ${puBaris}
     ${nikBaris ? `<div>${nikBaris}</div>` : ""}
   </div>`;
 }
@@ -2212,18 +2255,42 @@ async function pagePulang(el){
       <label>Terapi yang Sudah Diberikan (opsional)</label><textarea id="rjTerapi"></textarea>
       <label>Dokter Perujuk (opsional)</label><input id="rjDokter">
     </div>
+    <div id="areaFormKematian" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+      <div class="section-title">Pencatatan Kematian Pasien</div>
+      <p class="hint">Wajib dilengkapi untuk Cara Keluar = Meninggal — dokumen ini menjadi dasar Surat Keterangan Kematian (nomor otomatis) &amp; tidak bisa diubah/dihapus setelah tersimpan.</p>
+      <div class="row"><div><label>Waktu Meninggal</label><input type="datetime-local" id="kmWaktu"></div>
+        <div><label>Tempat Meninggal (opsional)</label><input id="kmTempat" placeholder="cth: Ruang Melati"></div></div>
+      <label>Sebab Kematian Langsung</label><textarea id="kmSebabLangsung" placeholder="cth: Gagal napas akut"></textarea>
+      <label>Sebab Kematian Antara (opsional)</label><input id="kmSebabAntara">
+      <label>Sebab Kematian Dasar (opsional)</label><input id="kmSebabDasar">
+      <label>Kondisi Lain yang Berkontribusi (opsional)</label><input id="kmKondisiLain">
+      <label>Jenis Kematian</label>
+      <select id="kmJenis"><option>Wajar</option><option>Tidak Wajar / Perlu Visum</option></select>
+      <label>Dokter yang Menyatakan</label>
+      <select id="kmDokterId" onchange="onPegawaiSelectChange('kmDokterId','kmDokterManual')"><option value="">Memuat daftar pegawai...</option></select>
+      <input id="kmDokterManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter manual (kalau belum ada di daftar pegawai)">
+      <label>Catatan (opsional)</label><textarea id="kmCatatan"></textarea>
+    </div>
     <div style="margin-top:12px"><button class="btn" onclick="submitPulang()">Proses Pulang</button></div>
     <div id="resumeHasil" style="margin-top:16px"></div>
   </div>`;
+  isiSelectPegawai("kmDokterId");
 }
 function toggleFormRujukan(){
-  const el = document.getElementById("areaFormRujukan");
-  if(el) el.style.display = val("caraKeluar")==="Rujuk" ? "block" : "none";
+  const rj = document.getElementById("areaFormRujukan");
+  if(rj) rj.style.display = val("caraKeluar")==="Rujuk" ? "block" : "none";
+  const km = document.getElementById("areaFormKematian");
+  if(km) km.style.display = val("caraKeluar")==="Meninggal" ? "block" : "none";
 }
 async function submitPulang(){
   const isRujuk = val("caraKeluar")==="Rujuk";
+  const isMeninggal = val("caraKeluar")==="Meninggal";
   if(isRujuk && (!val("rjTujuan") || !val("rjAlasan"))){
     toast("Fasilitas tujuan & alasan rujukan wajib diisi untuk Cara Keluar = Rujuk");
+    return;
+  }
+  if(isMeninggal && (!val("kmWaktu") || !val("kmSebabLangsung"))){
+    toast("Waktu meninggal & sebab kematian langsung wajib diisi untuk Cara Keluar = Meninggal");
     return;
   }
   const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar"), kondisiPulang:val("kondisiPulang"), instruksiPulang:val("instruksiPulang")}, "POST");
@@ -2238,6 +2305,19 @@ async function submitPulang(){
       }, "POST");
       rujukanMsg = rr.ok ? "" : `<div class="flag-item warn" style="margin-top:8px">⚠️ Kunjungan berhasil diproses pulang, tapi data surat rujukan GAGAL disimpan: ${rr.msg||"-"}. Silakan catat manual atau hubungi admin.</div>`;
     }
+    let kematianMsg = "", nomorSuratKematian = null;
+    if(isMeninggal){
+      const dokterPilih = pegawaiPayload("kmDokterId","kmDokterManual");
+      const km = await api("kematian.catat", {
+        kunjunganId: state.activeKunjunganId, waktuMeninggal: val("kmWaktu"), tempatMeninggal: val("kmTempat"),
+        sebabKematianLangsung: val("kmSebabLangsung"), sebabKematianAntara: val("kmSebabAntara"),
+        sebabKematianDasar: val("kmSebabDasar"), kondisiLainBerkontribusi: val("kmKondisiLain"),
+        jenisKematian: val("kmJenis"), dokterYangMenyatakanId: dokterPilih.id, dokterYangMenyatakan: dokterPilih.nama,
+        catatan: val("kmCatatan")
+      }, "POST");
+      if(km.ok){ nomorSuratKematian = km.nomorSurat; }
+      else kematianMsg = `<div class="flag-item warn" style="margin-top:8px">⚠️ Kunjungan berhasil diproses pulang, tapi Pencatatan Kematian GAGAL disimpan: ${km.msg||"-"}. Silakan catat manual atau hubungi admin.</div>`;
+    }
     const k = r.prediksiINACBG;
     document.getElementById("resumeHasil").innerHTML = `<div class="cbg-result">
       <b>✅ Resume Selesai</b><br>
@@ -2246,15 +2326,44 @@ async function submitPulang(){
     </div>
     ${r.msg ? `<p class="hint">${r.msg}</p>` : ""}
     ${rujukanMsg}
+    ${kematianMsg}
+    ${nomorSuratKematian ? `<p class="hint">Surat Keterangan Kematian No. <b>${nomorSuratKematian}</b> tersimpan.</p>` : ""}
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn ghost" onclick="tampilkanCetak('${state.activeKunjunganId}')">🖨️ Tampilkan Resume Medis & Kuitansi</button>
       ${(isRujuk && !rujukanMsg) ? `<button class="btn ghost" onclick="tampilkanCetakRujukan('${state.activeKunjunganId}')">🖨️ Tampilkan Surat Rujukan</button>` : ""}
+      ${nomorSuratKematian ? `<button class="btn ghost" onclick="tampilkanCetakKematian('${state.activeKunjunganId}')">🖨️ Tampilkan Surat Keterangan Kematian</button>` : ""}
     </div>
     <div id="areaCetak" style="margin-top:14px"></div>
-    <div id="areaCetakRujukan" style="margin-top:14px"></div>`;
+    <div id="areaCetakRujukan" style="margin-top:14px"></div>
+    <div id="areaCetakKematian" style="margin-top:14px"></div>`;
   } else {
     toast(r.msg || "Gagal memproses pulang");
   }
+}
+async function tampilkanCetakKematian(kunjunganId){
+  const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
+  if(!d.ok){ toast("Gagal memuat data"); return; }
+  const km = d.kematian;
+  if(!km){ toast("Data kematian tidak ditemukan"); return; }
+  const p = d.pasien||{};
+  document.getElementById("areaCetakKematian").innerHTML = `
+    <div class="resep-print">
+      <h2>RSU Allam Medica</h2>
+      <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Surat Keterangan Kematian</div>
+      <div class="grid cols2" style="margin-bottom:10px;">
+        <div><b>No. Surat:</b> ${km.nomorSurat}<br><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Jenis Kelamin:</b> ${p.jk||p.JK||"-"}</div>
+        <div><b>Waktu Meninggal:</b> ${new Date(km.waktuMeninggal).toLocaleString('id-ID')}<br><b>Tempat Meninggal:</b> ${km.tempatMeninggal||"-"}<br><b>Jenis Kematian:</b> ${km.jenisKematian}</div>
+      </div>
+      <table>
+        <tr><th>Sebab Kematian Langsung</th><td>${km.sebabKematianLangsung}</td></tr>
+        <tr><th>Sebab Kematian Antara</th><td>${km.sebabKematianAntara||"-"}</td></tr>
+        <tr><th>Sebab Kematian Dasar</th><td>${km.sebabKematianDasar||"-"}</td></tr>
+        <tr><th>Kondisi Lain yang Berkontribusi</th><td>${km.kondisiLainBerkontribusi||"-"}</td></tr>
+        <tr><th>Dokter yang Menyatakan</th><td>${km.dokterYangMenyatakan}</td></tr>
+      </table>
+      <p class="hint" style="margin-top:10px">Dicatat oleh ${km.dicatatOleh||"-"} pada ${new Date(km.waktuDicatat).toLocaleString('id-ID')}. ${km.jenisKematian==='Tidak Wajar / Perlu Visum' ? 'Kematian tidak wajar — memerlukan pemeriksaan lebih lanjut (visum) sesuai ketentuan yang berlaku.' : ''}</p>
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>`;
 }
 async function tampilkanCetakRujukan(kunjunganId){
   const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
@@ -2431,6 +2540,7 @@ async function pageRekap(el){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
         <button class="btn" onclick="renderRekapTab('klaim')">Rekap Klaim INA-CBG</button>
         <button class="btn" onclick="renderRekapTab('diagnosa')">Laporan per Diagnosa</button>
+        <button class="btn" onclick="renderRekapTab('kematian')">Rekap Kematian</button>
       </div>
       <div id="rekapBody"></div>
     </div>`;
@@ -2461,7 +2571,35 @@ async function renderRekapTab(tab){
       <button class="btn" onclick="muatRekapDiagnosa()">Tampilkan</button>
       <div id="rekapDiagnosaList" style="margin-top:14px">Memuat...</div>`;
     await muatRekapDiagnosa();
+  } else if (tab === 'kematian') {
+    body.innerHTML = `
+      <p class="sub">Rekap seluruh pencatatan kematian pasien pada periode yang dipilih.</p>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="rk_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="rk_sampai" type="date"></div>
+      </div>
+      <button class="btn" onclick="muatRekapKematian()">Tampilkan</button>
+      <div id="rekapKematianList" style="margin-top:14px">Memuat...</div>`;
+    const now = new Date();
+    document.getElementById("rk_dari").value = new Date(now.getTime() - 30*86400000).toISOString().slice(0,10);
+    document.getElementById("rk_sampai").value = now.toISOString().slice(0,10);
+    await muatRekapKematian();
   }
+}
+async function muatRekapKematian(){
+  const box = document.getElementById('rekapKematianList');
+  const r = await api('kematian.rekap', {dari: val('rk_dari'), sampai: val('rk_sampai')}, 'POST');
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || 'Gagal memuat'}</div>`; return; }
+  const rows = r.data || [];
+  box.innerHTML = `<div class="grid cols3" style="margin-bottom:12px">
+      <div class="card stat"><b>${r.totalKematian}</b><span>Total Kematian</span></div>
+      <div class="card stat"><b>${r.jumlahWajar}</b><span>Wajar</span></div>
+      <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.jumlahTidakWajar}</b><span>Tidak Wajar / Perlu Visum</span></div>
+    </div>` +
+    (rows.length ? `<table>
+    <tr><th>No. Surat</th><th>Pasien</th><th>No. RM</th><th>Waktu Meninggal</th><th>Sebab Langsung</th><th>Jenis</th><th>Dokter</th></tr>
+    ${rows.map(x=>`<tr><td>${x.nomorSurat}</td><td>${x.namaPasien}</td><td>${x.noRm}</td><td>${new Date(x.waktuMeninggal).toLocaleString('id-ID')}</td><td>${x.sebabKematianLangsung}</td><td><span class="badge ${x.jenisKematian==='Wajar'?'ok':'danger'}">${x.jenisKematian}</span></td><td>${x.dokterYangMenyatakan}</td></tr>`).join("")}
+  </table>` : `<div class="empty">Tidak ada data kematian pada periode ini.</div>`);
 }
 async function muatRekapDiagnosa(){
   const box = document.getElementById('rekapDiagnosaList');
@@ -2746,6 +2884,7 @@ async function linenTandaiBersih(id){
 /* ================== MANAJEMEN TEMPAT TIDUR / KAMAR ================== */
 async function pageManajemenKamar(el){
   const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('ranap');
+  const bolehSensus = state.user.role === 'admin' || (state.user.modul||[]).includes('ranap') || (state.user.modul||[]).includes('mutu');
   el.innerHTML = `<h1>🛏️ Manajemen Tempat Tidur / Kamar</h1><p class="sub">Ketersediaan tempat tidur rawat inap — semua staf yang login bisa melihat, hanya admin/modul "Manajemen Tempat Tidur/Kamar" yang bisa menambah &amp; mengubah status.</p>
     <div class="grid cols4" id="kamarStats"></div>
     <div class="section-title" style="margin-top:16px">Ketersediaan per Ruangan</div>
@@ -2761,8 +2900,42 @@ async function pageManajemenKamar(el){
       <button class="btn sm" style="margin-top:6px" onclick="submitTambahKamar()">Tambah</button>
     </div>` : ""}
     <div class="section-title" style="margin-top:20px">Daftar Tempat Tidur</div>
-    <div id="kamarList"></div>`;
+    <div id="kamarList"></div>
+    ${bolehSensus ? `
+    <div class="section-title" style="margin-top:24px">📈 Sensus Harian &amp; Indikator BOR/LOS/TOI/BTO</div>
+    <div class="card">
+      <p class="hint">Indikator standar manajemen rumah sakit (Depkes) — dihitung otomatis dari data rawat inap &amp; tempat tidur pada periode yang dipilih. "Jumlah TT" memakai SELURUH tempat tidur terdaftar (termasuk yang sedang "Perbaikan") — penyederhanaan yang wajar dipahami sebelum dipakai laporan resmi.</p>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="sensusDari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="sensusSampai" type="date"></div>
+      </div>
+      <button class="btn" style="margin-top:6px" onclick="muatSensusBOR()">Tampilkan</button>
+      <div id="sensusBody" style="margin-top:14px"></div>
+    </div>` : ""}`;
+  if(bolehSensus){
+    const now = new Date();
+    document.getElementById("sensusDari").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+    document.getElementById("sensusSampai").value = now.toISOString().slice(0,10);
+  }
   await muatDataKamar(bolehKelola);
+}
+async function muatSensusBOR(){
+  const box = document.getElementById("sensusBody");
+  box.innerHTML = "Memuat...";
+  const r = await api("sensus.borRawatInap", {dari: val("sensusDari"), sampai: val("sensusSampai")}, "POST");
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || "Gagal memuat data sensus"}</div>`; return; }
+  box.innerHTML = `
+    <div class="grid cols4">
+      <div class="card stat"><b>${r.bor ?? "-"}%</b><span>BOR (Bed Occupancy Rate)</span></div>
+      <div class="card stat"><b>${r.avlos ?? "-"}</b><span>AvLOS (hari, rata-rata lama rawat)</span></div>
+      <div class="card stat"><b>${r.toi ?? "-"}</b><span>TOI (hari, interval kosong TT)</span></div>
+      <div class="card stat"><b>${r.bto ?? "-"}</b><span>BTO (kali, per TT per periode)</span></div>
+    </div>
+    <p class="hint" style="margin-top:10px">Periode ${new Date(r.dari).toLocaleDateString('id-ID')} – ${new Date(r.sampai).toLocaleDateString('id-ID')} (${r.jumlahHari} hari) · Jumlah TT: <b>${r.jumlahTempatTidur}</b> · Hari Perawatan: <b>${r.hariPerawatan}</b> · Pasien Keluar: <b>${r.pasienKeluarTotal}</b> (Hidup: ${r.pasienKeluarHidup}, Meninggal: ${r.pasienKeluarMati})</p>
+    <div class="section-title" style="margin-top:14px">Sensus Harian</div>
+    <table><tr><th>Tanggal</th><th>Pasien Dirawat</th><th>Pasien Masuk</th><th>Pasien Keluar</th></tr>
+      ${(r.sensusHarian||[]).map(s=>`<tr><td>${new Date(s.tanggal).toLocaleDateString('id-ID')}</td><td>${s.pasienDirawat}</td><td>${s.pasienMasuk}</td><td>${s.pasienKeluar}</td></tr>`).join("")}
+    </table>`;
 }
 async function muatDataKamar(bolehKelola){
   const [ket, rows] = await Promise.all([api('kamar.ketersediaan', {}, 'GET'), api('kamar.list', {}, 'GET')]);
@@ -3345,6 +3518,174 @@ async function tfSubmit(action, data, tab){
   if (r && r.ok) { toast('Tersimpan'); } else { toast((r && r.error) || 'Gagal menyimpan'); }
   renderTarifTab(tab);
 }
+
+/* ============ KAMAR OPERASI (Jadwal Operasi + Checklist Keselamatan Operasi 3 fase) ============
+   Sesuai standar WHO Surgical Safety Checklist: Sign In (sebelum induksi
+   anestesi), Time Out (sebelum insisi), Sign Out (sebelum pasien keluar OK).
+   Setiap fase HANYA bisa diisi SEKALI dan tidak bisa diubah setelah
+   tersimpan (dokumen keselamatan pasien, sama seperti dokumen legal lain). */
+const CHECKLIST_OPERASI_ITEM = {
+  "Sign In": [
+    ["identitasPasienDikonfirmasi", "Identitas pasien, lokasi operasi & prosedur sudah dikonfirmasi (oleh pasien sendiri kalau memungkinkan)"],
+    ["lokasiTindakanDitandai", "Lokasi tindakan sudah ditandai (site marking) atau tidak diperlukan penandaan"],
+    ["obatMesinAnestesiDicek", "Mesin & obat-obatan anestesi sudah dicek lengkap"],
+    ["pulseOximeterTerpasang", "Pulse oximeter terpasang & berfungsi pada pasien"],
+    ["alergiDiketahui", "Riwayat alergi pasien sudah diketahui tim"],
+  ],
+  "Time Out": [
+    ["timTelahMemperkenalkanDiri", "Seluruh anggota tim sudah memperkenalkan nama & perannya"],
+    ["identitasLokasiProsedurDikonfirmasiTim", "Identitas pasien, lokasi, & prosedur dikonfirmasi ulang oleh seluruh tim (dokter, anestesi, perawat)"],
+    ["antibiotikProfilaksisDiberikan", "Antibiotik profilaksis sudah diberikan dalam 60 menit terakhir, atau tidak diperlukan"],
+    ["antisipasiKejadianKritisDidiskusikan", "Antisipasi kejadian kritis (kehilangan darah, kesulitan alat, dll) sudah didiskusikan tim"],
+  ],
+  "Sign Out": [
+    ["namaProsedurDicatat", "Nama prosedur/tindakan yang dilakukan sudah dicatat"],
+    ["instrumenKasaJarumLengkap", "Jumlah instrumen, kasa & jarum sudah dihitung lengkap (tidak ada yang tertinggal)"],
+    ["spesimenDiberiLabel", "Spesimen (kalau ada) sudah diberi label dengan benar, atau tidak ada spesimen"],
+    ["instruksiPemulihanDisampaikan", "Instruksi pemulihan/perawatan pasca operasi sudah disampaikan ke tim ruangan"],
+  ],
+};
+async function pageKamarOperasi(el){
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('ok');
+  el.innerHTML = `<h1>🔪 Kamar Operasi</h1><p class="sub">Jadwal operasi &amp; Checklist Keselamatan Operasi 3 fase (Sign In/Time Out/Sign Out) sesuai standar WHO Surgical Safety Checklist — semua staf yang login bisa melihat, hanya admin/rekam medis/modul "Kamar Operasi" yang bisa menjadwalkan &amp; mengisi checklist.</p>
+    ${bolehKelola ? `
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title">Tambah Jadwal Operasi</div>
+      <label>No. Kunjungan Pasien</label>
+      <input id="joKunjunganId" value="${state.activeKunjunganId||''}" placeholder="cth: KJ-... (isi dari Kunjungan Aktif, atau ketik manual)">
+      <label>Nama Tindakan Operasi</label><input id="joNamaTindakan" placeholder="cth: Appendektomi">
+      <div class="row">
+        <div><label>Dokter Operator</label>
+          <select id="joOperatorId" onchange="onPegawaiSelectChange('joOperatorId','joOperatorManual')"><option value="">Memuat daftar pegawai...</option></select>
+          <input id="joOperatorManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter operator manual"></div>
+        <div><label>Dokter Anestesi (opsional)</label>
+          <select id="joAnestesiId" onchange="onPegawaiSelectChange('joAnestesiId','joAnestesiManual')"><option value="">Memuat daftar pegawai...</option></select>
+          <input id="joAnestesiManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter anestesi manual"></div>
+      </div>
+      <div class="row">
+        <div><label>Jenis Anestesi (opsional)</label>
+          <select id="joJenisAnestesi"><option value="">-- Pilih --</option><option>Umum</option><option>Regional</option><option>Lokal</option><option>Sedasi</option><option>Lainnya</option></select></div>
+        <div><label>Tim Lain (opsional)</label><input id="joTimLain" placeholder="cth: Perawat instrumen: Susi"></div>
+      </div>
+      <div class="row">
+        <div><label>Tanggal Operasi</label><input type="date" id="joTanggal"></div>
+        <div><label>Jam Mulai (opsional)</label><input type="time" id="joJam"></div>
+        <div><label>Ruang Operasi</label><input id="joRuang" placeholder="cth: OK 1"></div>
+      </div>
+      <label>Catatan (opsional)</label><textarea id="joCatatan"></textarea>
+      <button class="btn" style="margin-top:8px" onclick="submitJadwalOperasi()">Simpan Jadwal</button>
+      <div class="hint" id="hasilJadwalOperasi" style="margin-top:8px"></div>
+    </div>` : ""}
+    <div class="section-title">Papan Jadwal Operasi</div>
+    <div class="row" style="margin-bottom:10px">
+      <div><label>Dari Tanggal</label><input type="date" id="joDari"></div>
+      <div><label>Sampai Tanggal</label><input type="date" id="joSampai"></div>
+    </div>
+    <button class="btn sm" onclick="muatJadwalOperasi()">Tampilkan</button>
+    <div id="jadwalOperasiList" style="margin-top:10px">Memuat...</div>`;
+  const now = new Date();
+  document.getElementById("joDari").value = now.toISOString().slice(0,10);
+  document.getElementById("joSampai").value = new Date(now.getTime() + 14*86400000).toISOString().slice(0,10);
+  if(bolehKelola){ isiSelectPegawai("joOperatorId"); isiSelectPegawai("joAnestesiId"); }
+  await muatJadwalOperasi();
+}
+async function submitJadwalOperasi(){
+  if(!val("joKunjunganId")){ toast("No. Kunjungan wajib diisi"); return; }
+  if(!val("joNamaTindakan")){ toast("Nama tindakan operasi wajib diisi"); return; }
+  if(!val("joTanggal")){ toast("Tanggal operasi wajib diisi"); return; }
+  if(!val("joRuang")){ toast("Ruang operasi wajib diisi"); return; }
+  const operatorPilih = pegawaiPayload("joOperatorId","joOperatorManual");
+  const anestesiPilih = pegawaiPayload("joAnestesiId","joAnestesiManual");
+  const r = await api("operasi.jadwalTambah", {
+    kunjunganId: val("joKunjunganId"), namaTindakanOperasi: val("joNamaTindakan"),
+    dokterOperatorId: operatorPilih.id, dokterOperator: operatorPilih.nama,
+    dokterAnestesiId: anestesiPilih.id, dokterAnestesi: anestesiPilih.nama,
+    jenisAnestesi: val("joJenisAnestesi"), timLain: val("joTimLain"),
+    tanggalOperasi: val("joTanggal"), jamMulai: val("joJam"), ruangOperasi: val("joRuang"),
+    catatan: val("joCatatan")
+  }, "POST");
+  if(r.ok){
+    toast("Jadwal operasi tersimpan");
+    document.getElementById("hasilJadwalOperasi").innerHTML = `✅ Jadwal operasi tersimpan.`;
+    ["joNamaTindakan","joTimLain","joCatatan"].forEach(id=>document.getElementById(id).value = "");
+    await muatJadwalOperasi();
+  } else toast(r.msg || "Gagal menyimpan jadwal operasi");
+}
+async function muatJadwalOperasi(){
+  const box = document.getElementById("jadwalOperasiList");
+  if(!box) return;
+  box.innerHTML = "Memuat...";
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('ok');
+  const rows = await api("operasi.jadwalList", {dari: val("joDari"), sampai: val("joSampai")}, "POST");
+  if(!rows || !rows.length){ box.innerHTML = `<div class="empty">Tidak ada jadwal operasi pada periode ini.</div>`; return; }
+  const statusBadge = {Dijadwalkan:"warn", Selesai:"ok", Dibatalkan:"danger"};
+  box.innerHTML = rows.map(jo => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${jo.namaTindakanOperasi}</b> — ${jo.namaPasien} (RM ${jo.noRm})</div>
+        <span class="badge ${statusBadge[jo.status]||'muted'}">${jo.status}</span>
+      </div>
+      <div class="hint" style="margin-top:4px">
+        ${new Date(jo.tanggalOperasi).toLocaleDateString('id-ID')}${jo.jamMulai ? (' '+jo.jamMulai) : ''} · Ruang ${jo.ruangOperasi} ·
+        Operator: ${jo.dokterOperator}${jo.dokterAnestesi ? (' · Anestesi: '+jo.dokterAnestesi) : ''}${jo.jenisAnestesi ? (' ('+jo.jenisAnestesi+')') : ''}
+      </div>
+      ${jo.catatan ? `<div class="hint">Catatan: ${jo.catatan}</div>` : ""}
+      ${bolehKelola && jo.status === 'Dijadwalkan' ? `
+        <div class="row" style="margin-top:6px">
+          <button class="btn sm" onclick="submitStatusJadwalOperasi('${jo.id}','Selesai')">Tandai Selesai</button>
+          <button class="btn sm danger" onclick="submitStatusJadwalOperasi('${jo.id}','Dibatalkan')">Batalkan</button>
+        </div>` : ""}
+      <div class="section-title" style="margin-top:10px;font-size:13px">Checklist Keselamatan Operasi</div>
+      ${renderChecklistOperasi(jo, bolehKelola)}
+    </div>`).join("");
+}
+async function submitStatusJadwalOperasi(id, status){
+  const r = await api("operasi.jadwalSetStatus", {id, status}, "POST");
+  if(r.ok){ toast("Status jadwal diperbarui"); await muatJadwalOperasi(); } else toast(r.msg || "Gagal mengubah status");
+}
+function renderChecklistOperasi(jo, bolehKelola){
+  const sudah = {}; (jo.checklist||[]).forEach(c => sudah[c.fase] = c);
+  return ["Sign In","Time Out","Sign Out"].map(fase => {
+    const c = sudah[fase];
+    if(c){
+      return `<div class="flag-item ${c.semuaTerkonfirmasi ? 'ok' : 'warn'}" style="margin-top:6px">
+        <b>${fase}</b> — ✔️ Sudah diisi oleh ${c.dicatatOleh||'-'}${c.profesiPencatat ? (' ('+c.profesiPencatat+')') : ''} pada ${new Date(c.waktu).toLocaleString('id-ID')}.
+        ${!c.semuaTerkonfirmasi ? `<br>⚠️ Ada item yang belum bisa dikonfirmasi. Catatan: ${c.catatan||'-'}` : ''}
+      </div>`;
+    }
+    if(!bolehKelola){
+      return `<div class="hint" style="margin-top:6px">${fase}: belum diisi.</div>`;
+    }
+    const items = CHECKLIST_OPERASI_ITEM[fase];
+    const faseId = fase.replace(/\s/g,'');
+    return `<div class="card" style="margin-top:6px;background:#fafafa">
+      <b>${fase}</b> — belum diisi
+      ${items.map(([key,label]) => `<div style="margin-top:6px"><label style="font-weight:normal;font-size:13px">${label}</label>
+        <div style="display:flex;gap:14px;margin-top:2px">
+          <label style="font-weight:normal;display:flex;align-items:center;gap:4px"><input type="radio" name="chk_${jo.id}_${faseId}_${key}" value="ya" onchange="cekItemChecklistOperasi('${jo.id}','${faseId}')"> Ya</label>
+          <label style="font-weight:normal;display:flex;align-items:center;gap:4px"><input type="radio" name="chk_${jo.id}_${faseId}_${key}" value="tidak" onchange="cekItemChecklistOperasi('${jo.id}','${faseId}')"> Tidak</label>
+        </div></div>`).join("")}
+      <label style="margin-top:6px">Catatan (wajib diisi kalau ada jawaban "Tidak")</label>
+      <textarea id="chkCatatan_${jo.id}_${faseId}"></textarea>
+      <button class="btn sm" style="margin-top:6px" onclick="submitChecklistOperasi('${jo.id}','${fase}')">Simpan Checklist ${fase}</button>
+    </div>`;
+  }).join("");
+}
+function cekItemChecklistOperasi(joId, faseId){ /* placeholder hook kalau nanti perlu validasi live; saat ini validasi cukup di submit */ }
+async function submitChecklistOperasi(joId, fase){
+  const faseId = fase.replace(/\s/g,'');
+  const items = CHECKLIST_OPERASI_ITEM[fase];
+  const itemDicek = {};
+  for(const [key,label] of items){
+    const checked = document.querySelector(`input[name="chk_${joId}_${faseId}_${key}"]:checked`);
+    if(!checked){ toast(`Item "${label}" wajib dijawab Ya/Tidak`); return; }
+    itemDicek[key] = checked.value === "ya";
+  }
+  const catatan = document.getElementById(`chkCatatan_${joId}_${faseId}`).value.trim();
+  const r = await api("operasi.checklistSimpan", {jadwalOperasiId: joId, fase, itemDicek, catatan}, "POST");
+  if(r.ok){ toast(`Checklist ${fase} tersimpan`); await muatJadwalOperasi(); } else toast(r.msg || "Gagal menyimpan checklist");
+}
+
 render();
 </script>
 </body>
