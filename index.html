@@ -209,7 +209,7 @@ verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penu
 const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal"], rekammedis:["rekammedis","cppt","asesmenawal"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
-  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"],
+  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
@@ -229,6 +229,7 @@ const DAFTAR_MODUL = [
   {id:"gizi", label:"Unit Penunjang — Gizi"},
   {id:"cssd", label:"Unit Penunjang — CSSD"},
   {id:"linen", label:"Unit Penunjang — Linen"},
+  {id:"bhp", label:"Unit Penunjang — BHP/Alkes (stok bahan habis pakai)"},
   {id:"ranap", label:"Manajemen Tempat Tidur/Kamar"},
   {id:"tarif", label:"Master Tarif"},
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
@@ -263,6 +264,7 @@ function renderNav(){
   if(ub && state.user){
     ub.innerHTML = `<b>${state.user.nama}</b><span class="role-tag">${state.user.role}</span><br>
       ${DEMO_MODE ? "" : `<button onclick="mulaiSetup2FA()">🔒 Aktifkan 2FA</button>`}
+      ${DEMO_MODE ? "" : `<button onclick="pageGantiPassword()">🔑 Ganti Password</button>`}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaHakAkses()">🗂️ Kelola Hak Akses</button>` : ""}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaPegawai()">👥 Kelola Pegawai</button>` : ""}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageRekapPegawai()">📊 Rekap Pegawai</button>` : ""}
@@ -653,6 +655,51 @@ async function muatLogAktivitas(reset){
   else box.innerHTML += html;
   _auditOffset += rows.length;
   btnLagi.style.display = rows.length >= 50 ? "" : "none";
+}
+
+/* ================== GANTI PASSWORD SENDIRI (semua staf) ==================
+   Murni Supabase Auth (supabase.auth.updateUser) -- tidak ada tabel/fungsi
+   database baru. Password lama diverifikasi ulang dulu (reauth) sebelum
+   diizinkan ganti, supaya tidak sembarang orang bisa ganti password kalau
+   perangkat staf lupa di-logout. */
+async function pageGantiPassword(){
+  const m = document.getElementById("main");
+  m.innerHTML = `<h1>Ganti Password</h1>
+    <p class="sub">Password baru minimal 8 karakter. Anda akan diminta memasukkan password lama dulu untuk verifikasi.</p>
+    <div class="card">
+      <label>Password Lama</label>
+      <input type="password" id="pwLama" autocomplete="current-password">
+      <label>Password Baru</label>
+      <input type="password" id="pwBaru" autocomplete="new-password" placeholder="Minimal 8 karakter">
+      <label>Ulangi Password Baru</label>
+      <input type="password" id="pwBaru2" autocomplete="new-password">
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="submitGantiPassword()">Simpan Password Baru</button>
+        <button class="btn ghost" onclick="goTo('dashboard')">Batal</button>
+      </div>
+      <div class="hint" id="hasilGantiPassword" style="margin-top:8px"></div>
+    </div>`;
+}
+async function submitGantiPassword(){
+  const lama = val("pwLama"), baru = val("pwBaru"), baru2 = val("pwBaru2");
+  const hasil = document.getElementById("hasilGantiPassword");
+  if(!lama || !baru || !baru2){ toast("Semua kolom wajib diisi"); return; }
+  if(baru.length < 8){ toast("Password baru minimal 8 karakter"); return; }
+  if(baru !== baru2){ toast("Konfirmasi password baru tidak cocok"); return; }
+  if(baru === lama){ toast("Password baru harus berbeda dari password lama"); return; }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const email = sessionData && sessionData.session && sessionData.session.user && sessionData.session.user.email;
+  if(!email){ toast("Sesi tidak ditemukan, silakan login ulang"); return; }
+
+  const { error: reauthError } = await supabase.auth.signInWithPassword({ email, password: lama });
+  if(reauthError){ toast("Password lama salah"); return; }
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: baru });
+  if(updateError){ toast("Gagal mengubah password: " + updateError.message); return; }
+
+  hasil.innerHTML = "✅ Password berhasil diubah.";
+  toast("Password berhasil diubah");
 }
 
 function rebuildAppShell(){
@@ -1902,6 +1949,9 @@ async function pageBilling(el){
   if(!state.activeKunjunganId) return;
   const d = window.__detail;
   const total = d.billing.reduce((s,r)=>s+Number(r.Total||0),0);
+  const totalDibayar = Number(d.totalDibayar||0);
+  const sisaTagihan = Number(d.sisaTagihan||0);
+  const pembayaran = d.pembayaran || [];
   el.innerHTML += `<div class="card">
     <div class="section-title">Tambah Item Billing</div>
     <div class="row"><div><label>Kategori</label><select id="kategori">
@@ -1916,11 +1966,98 @@ async function pageBilling(el){
     ${d.billing.map(x=>`<tr><td>${x.kategori||x.Kategori}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.qty||x.Qty}</td><td>Rp${Number(x.tarifSatuan||x.TarifSatuan).toLocaleString('id-ID')}</td><td>Rp${Number(x.Total).toLocaleString('id-ID')}</td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada billing</div>`}
   <div style="text-align:right;margin-top:10px;font-size:16px;font-weight:700;color:var(--teal-dk)">Total: Rp${total.toLocaleString('id-ID')}</div>
-  </div>`;
+  </div>
+  <div class="section-title">Pembayaran</div>
+  <div class="card">
+    <label>Metode Bayar</label>
+    <select id="pyMetode" onchange="togglePyTunai()">
+      <option>Tunai</option><option>Transfer Bank</option><option>Kartu Debit/Kredit</option><option>BPJS</option><option>Asuransi Lain</option><option>Lainnya</option>
+    </select>
+    <label>Jumlah Bayar (Rp)</label><input type="number" id="pyJumlah" placeholder="cth: ${sisaTagihan>0?Math.round(sisaTagihan):0}">
+    <div id="areaPyTunai"><label>Uang Diterima (Rp) — opsional, untuk hitung kembalian</label><input type="number" id="pyUangDiterima"></div>
+    <label>Keterangan (opsional)</label><input id="pyKeterangan">
+    <button class="btn" style="margin-top:10px" onclick="submitPembayaran()">Catat Pembayaran</button>
+    <div class="hint" id="hasilPembayaran" style="margin-top:8px"></div>
+  </div>
+  <div class="card" style="margin-top:10px">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>Total Tagihan: <b>Rp${total.toLocaleString('id-ID')}</b></div>
+      <div>Total Dibayar: <b style="color:var(--teal-dk)">Rp${totalDibayar.toLocaleString('id-ID')}</b></div>
+      <div>${sisaTagihan > 0 ? `Sisa Tagihan: <b style="color:var(--red)">Rp${sisaTagihan.toLocaleString('id-ID')}</b>` : (sisaTagihan < 0 ? `Kelebihan Bayar: <b style="color:var(--teal-dk)">Rp${Math.abs(sisaTagihan).toLocaleString('id-ID')}</b>` : `<b style="color:var(--teal-dk)">✅ Lunas</b>`)}</div>
+    </div>
+  </div>
+  <div class="section-title" style="margin-top:14px">Riwayat Pembayaran</div>
+  <div class="card">${pembayaran.length ? `<table><tr><th>No. Kuitansi</th><th>Tanggal</th><th>Metode</th><th>Jumlah</th><th>Kembalian</th><th>Status</th><th>Dicatat Oleh</th><th>Aksi</th></tr>
+    ${pembayaran.map(x=>`<tr>
+      <td>${x.noKuitansi}</td><td>${new Date(x.waktuBayar).toLocaleString('id-ID')}</td><td>${x.metodeBayar}</td>
+      <td>Rp${Number(x.jumlahBayar).toLocaleString('id-ID')}</td><td>${x.kembalian!=null?'Rp'+Number(x.kembalian).toLocaleString('id-ID'):'-'}</td>
+      <td><span class="badge ${x.status==='Dibatalkan'?'danger':'ok'}">${x.status}</span>${x.status==='Dibatalkan'&&x.alasanBatal?`<div class="hint">Alasan: ${x.alasanBatal}</div>`:''}</td>
+      <td>${x.dicatatOleh||'-'}</td>
+      <td>
+        <button class="btn sm ghost" onclick="cetakKuitansi('${x.id}')">🖨️ Cetak</button>
+        ${(state.user.role==='admin' && x.status==='Berlaku') ? `<button class="btn sm ghost" onclick="batalkanPembayaran('${x.id}')">Batalkan</button>` : ""}
+      </td>
+    </tr>`).join("")}
+  </table>` : `<div class="empty">Belum ada pembayaran tercatat</div>`}
+  </div>
+  <div id="areaCetakKuitansi" style="margin-top:14px"></div>`;
+  togglePyTunai();
+}
+function togglePyTunai(){
+  const el = document.getElementById("areaPyTunai");
+  if(el) el.style.display = val("pyMetode")==="Tunai" ? "block" : "none";
 }
 async function submitBilling(){
   const r = await api("tambahBilling", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kategori:val("kategori"), Kategori:val("kategori"), deskripsi:val("deskBilling"), Deskripsi:val("deskBilling"), qty:val("qty"), Qty:val("qty"), tarifSatuan:val("tarifSatuan"), TarifSatuan:val("tarifSatuan")}, "POST");
   if(r.ok){ toast("Item billing ditambahkan"); render(); }
+}
+async function submitPembayaran(){
+  const jumlah = Number(val("pyJumlah"))||0;
+  if(jumlah <= 0){ toast("Jumlah bayar harus lebih dari 0"); return; }
+  const r = await api("pembayaran.catat", {
+    kunjunganId: state.activeKunjunganId, jumlahBayar: jumlah, metodeBayar: val("pyMetode"),
+    uangDiterima: val("pyUangDiterima") ? Number(val("pyUangDiterima")) : undefined,
+    keterangan: val("pyKeterangan")
+  }, "POST");
+  if(r.ok){
+    let msg = `✅ Pembayaran tercatat — No. Kuitansi: ${r.noKuitansi}`;
+    if(r.kembalian != null) msg += ` — Kembalian: Rp${Number(r.kembalian).toLocaleString('id-ID')}`;
+    document.getElementById("hasilPembayaran").innerHTML = msg;
+    toast("Pembayaran tercatat");
+    render();
+  } else toast(r.msg || "Gagal mencatat pembayaran");
+}
+async function batalkanPembayaran(id){
+  const alasan = prompt("Alasan pembatalan pembayaran ini (wajib):");
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast("Alasan pembatalan wajib diisi"); return; }
+  const r = await api("pembayaran.batalkan", {id, alasan}, "POST");
+  if(r.ok){ toast("Pembayaran dibatalkan"); render(); } else toast(r.msg || "Gagal membatalkan pembayaran");
+}
+function cetakKuitansi(pembayaranId){
+  const d = window.__detail;
+  const py = (d.pembayaran||[]).find(x=>x.id===pembayaranId);
+  if(!py){ toast("Data pembayaran tidak ditemukan"); return; }
+  const p = d.pasien||{};
+  document.getElementById("areaCetakKuitansi").innerHTML = `
+    <div class="resep-print">
+      <h2>RSU Allam Medica</h2>
+      <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Kuitansi Pembayaran</div>
+      <div class="grid cols2" style="margin-bottom:10px;">
+        <div><b>No. Kuitansi:</b> ${py.noKuitansi}<br><b>Tanggal:</b> ${new Date(py.waktuBayar).toLocaleString('id-ID')}</div>
+        <div><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Kunjungan:</b> ${state.activeKunjunganId}</div>
+      </div>
+      <table>
+        <tr><th>Metode Bayar</th><td>${py.metodeBayar}</td></tr>
+        <tr><th>Jumlah Dibayar</th><td>Rp${Number(py.jumlahBayar).toLocaleString('id-ID')}</td></tr>
+        ${py.uangDiterima!=null ? `<tr><th>Uang Diterima</th><td>Rp${Number(py.uangDiterima).toLocaleString('id-ID')}</td></tr>
+        <tr><th>Kembalian</th><td>Rp${Number(py.kembalian).toLocaleString('id-ID')}</td></tr>` : ""}
+        ${py.keterangan ? `<tr><th>Keterangan</th><td>${py.keterangan}</td></tr>` : ""}
+        <tr><th>Dicatat Oleh</th><td>${py.dicatatOleh||"-"}</td></tr>
+        ${py.status==='Dibatalkan' ? `<tr><th>Status</th><td style="color:var(--red)">DIBATALKAN — ${py.alasanBatal||''}</td></tr>` : ""}
+      </table>
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>`;
 }
 
 async function pageInaCbg(el){
@@ -1959,19 +2096,53 @@ async function pagePulang(el){
   if(!state.activeKunjunganId) return;
   el.innerHTML += `<div class="card">
     <label>Cara Keluar</label>
-    <select id="caraKeluar"><option>Pulang Normal</option><option>Pulang Paksa</option><option>Rujuk</option><option>Meninggal</option></select>
+    <select id="caraKeluar" onchange="toggleFormRujukan()"><option>Pulang Normal</option><option>Pulang Paksa</option><option>Rujuk</option><option>Meninggal</option></select>
     <label>Kondisi Saat Pulang</label>
     <textarea id="kondisiPulang" placeholder="cth: Membaik, keluhan diare sudah reda"></textarea>
     <label>Instruksi Kontrol / Obat Pulang</label>
     <textarea id="instruksiPulang" placeholder="cth: Oralit bila diare kambuh, kontrol Poli Dalam 1 minggu lagi, hindari makanan pedas/bersantan"></textarea>
+    <div id="areaFormRujukan" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+      <div class="section-title">Data Surat Rujukan</div>
+      <label>Fasilitas Tujuan</label><input id="rjTujuan" placeholder="cth: RSUD Brebes">
+      <label>Alamat Fasilitas (opsional)</label><input id="rjAlamat">
+      <label>Cara Rujuk</label>
+      <select id="rjCara"><option value="">-- Pilih --</option>
+        <option value="Vertikal (naik ke fasilitas lebih tinggi)">Vertikal (naik ke fasilitas lebih tinggi)</option>
+        <option value="Horizontal (fasilitas setara)">Horizontal (fasilitas setara)</option>
+        <option value="Rujuk Balik">Rujuk Balik</option>
+      </select>
+      <label>Alasan Rujukan</label><textarea id="rjAlasan" placeholder="cth: Butuh fasilitas ICU yang tidak tersedia di RS ini"></textarea>
+      <label>Diagnosa Saat Dirujuk (opsional)</label><input id="rjDiagnosa">
+      <label>Kondisi Saat Dirujuk (opsional)</label><textarea id="rjKondisi"></textarea>
+      <label>Terapi yang Sudah Diberikan (opsional)</label><textarea id="rjTerapi"></textarea>
+      <label>Dokter Perujuk (opsional)</label><input id="rjDokter">
+    </div>
     <div style="margin-top:12px"><button class="btn" onclick="submitPulang()">Proses Pulang</button></div>
     <div id="resumeHasil" style="margin-top:16px"></div>
   </div>`;
 }
+function toggleFormRujukan(){
+  const el = document.getElementById("areaFormRujukan");
+  if(el) el.style.display = val("caraKeluar")==="Rujuk" ? "block" : "none";
+}
 async function submitPulang(){
+  const isRujuk = val("caraKeluar")==="Rujuk";
+  if(isRujuk && (!val("rjTujuan") || !val("rjAlasan"))){
+    toast("Fasilitas tujuan & alasan rujukan wajib diisi untuk Cara Keluar = Rujuk");
+    return;
+  }
   const r = await api("prosesPulang", {kunjunganId:state.activeKunjunganId, caraKeluar:val("caraKeluar"), kondisiPulang:val("kondisiPulang"), instruksiPulang:val("instruksiPulang")}, "POST");
   if(r.ok){
     toast(r.msg || "Pasien berhasil diproses pulang");
+    let rujukanMsg = "";
+    if(isRujuk){
+      const rr = await api("rujukan.tambah", {
+        kunjunganId: state.activeKunjunganId, tujuanFasilitas: val("rjTujuan"), alamatFasilitas: val("rjAlamat"),
+        caraRujuk: val("rjCara"), alasanRujukan: val("rjAlasan"), diagnosaRujukan: val("rjDiagnosa"),
+        kondisiSaatDirujuk: val("rjKondisi"), terapiYangDiberikan: val("rjTerapi"), dokterPerujuk: val("rjDokter")
+      }, "POST");
+      rujukanMsg = rr.ok ? "" : `<div class="flag-item warn" style="margin-top:8px">⚠️ Kunjungan berhasil diproses pulang, tapi data surat rujukan GAGAL disimpan: ${rr.msg||"-"}. Silakan catat manual atau hubungi admin.</div>`;
+    }
     const k = r.prediksiINACBG;
     document.getElementById("resumeHasil").innerHTML = `<div class="cbg-result">
       <b>✅ Resume Selesai</b><br>
@@ -1979,11 +2150,42 @@ async function submitPulang(){
       Total Billing RS: Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}
     </div>
     ${r.msg ? `<p class="hint">${r.msg}</p>` : ""}
-    <button class="btn ghost" style="margin-top:10px" onclick="tampilkanCetak('${state.activeKunjunganId}')">🖨️ Tampilkan Resume Medis & Kuitansi</button>
-    <div id="areaCetak" style="margin-top:14px"></div>`;
+    ${rujukanMsg}
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ghost" onclick="tampilkanCetak('${state.activeKunjunganId}')">🖨️ Tampilkan Resume Medis & Kuitansi</button>
+      ${(isRujuk && !rujukanMsg) ? `<button class="btn ghost" onclick="tampilkanCetakRujukan('${state.activeKunjunganId}')">🖨️ Tampilkan Surat Rujukan</button>` : ""}
+    </div>
+    <div id="areaCetak" style="margin-top:14px"></div>
+    <div id="areaCetakRujukan" style="margin-top:14px"></div>`;
   } else {
     toast(r.msg || "Gagal memproses pulang");
   }
+}
+async function tampilkanCetakRujukan(kunjunganId){
+  const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
+  if(!d.ok){ toast("Gagal memuat data"); return; }
+  const rj = (d.rujukan||[])[0];
+  if(!rj){ toast("Data rujukan tidak ditemukan"); return; }
+  const p = d.pasien||{};
+  document.getElementById("areaCetakRujukan").innerHTML = `
+    <div class="resep-print">
+      <h2>RSU Allam Medica</h2>
+      <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Surat Rujukan Pasien</div>
+      <div class="grid cols2" style="margin-bottom:10px;">
+        <div><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}<br><b>Jenis Kelamin:</b> ${p.jk||p.JK||"-"}</div>
+        <div><b>Tanggal:</b> ${new Date(rj.waktuDibuat).toLocaleString('id-ID')}<br><b>Dokter Perujuk:</b> ${rj.dokterPerujuk||"-"}</div>
+      </div>
+      <table>
+        <tr><th>Fasilitas Tujuan</th><td>${rj.tujuanFasilitas}${rj.alamatFasilitas?(' — '+rj.alamatFasilitas):''}</td></tr>
+        <tr><th>Cara Rujuk</th><td>${rj.caraRujuk||"-"}</td></tr>
+        <tr><th>Diagnosa</th><td>${rj.diagnosaRujukan||"-"}</td></tr>
+        <tr><th>Alasan Rujukan</th><td>${rj.alasanRujukan}</td></tr>
+        <tr><th>Kondisi Saat Dirujuk</th><td>${rj.kondisiSaatDirujuk||"-"}</td></tr>
+        <tr><th>Terapi yang Sudah Diberikan</th><td>${rj.terapiYangDiberikan||"-"}</td></tr>
+      </table>
+      <p class="hint" style="margin-top:10px">Dicatat oleh ${rj.dicatatOleh||"-"}. Surat ini menyertai pasien saat dirujuk ke fasilitas tujuan.</p>
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>`;
 }
 
 async function tampilkanCetak(kunjunganId){
@@ -2110,7 +2312,7 @@ async function pageAturanBA(el){
 // tetap melihat semua sub-unit seperti sebelumnya (tidak berubah). Staf baru
 // (role "staf") hanya melihat sub-unit yang modulnya dicentangkan admin —
 // misalnya apoteker cuma lihat tab Farmasi, bukan keenamnya.
-const PENUNJANG_TAB_LABEL = {lab:"Lab", rad:"Radiologi", farmasi:"Farmasi", gizi:"Gizi", cssd:"CSSD", linen:"Linen"};
+const PENUNJANG_TAB_LABEL = {lab:"Lab", rad:"Radiologi", farmasi:"Farmasi", gizi:"Gizi", cssd:"CSSD", linen:"Linen", bhp:"BHP/Alkes"};
 function penunjangTabsAllowed(){
   const semua = Object.keys(PENUNJANG_TAB_LABEL);
   if(!state.user) return [];
@@ -2235,7 +2437,63 @@ async function renderPenunjangTab(tab){
       <div id="pjList"></div>`;
     const rows = await api('linen.listProses', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderLinenList(rows, bolehProsesLinen);
+  } else if (tab === 'bhp') {
+    const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('bhp');
+    const bhpRows = await api('bhp.list', {}, 'POST');
+    const bhpOptions = (bhpRows||[]).map(b=>`<option value="${b.kode}">${b.nama} (stok ${b.stok}${b.satuan?(' '+b.satuan):''})</option>`).join("");
+    body.innerHTML = `
+      <div class="section-title">Catat Pemakaian BHP/Alkes</div>
+      <label>Item</label><select id="bhp_kode"><option value="">-- Pilih Item --</option>${bhpOptions}</select>
+      <label>Jumlah</label><input id="bhp_jumlah" type="number" value="1">
+      <label>Unit/Ruangan Tujuan (opsional kalau tidak terkait pasien tertentu)</label><input id="bhp_unit" placeholder="cth: IGD, Ruang Melati">
+      <label>Kunjungan Terkait (opsional)</label><input id="bhp_kunjungan" placeholder="Kode kunjungan, kosongkan kalau tidak terkait pasien tertentu">
+      <label>Keterangan (opsional)</label><input id="bhp_ket">
+      <button class="btn" onclick="bhpCatatPemakaian()">Catat Pemakaian</button>
+      ${!bhpRows.length ? `<p class="hint">Belum ada item BHP/Alkes terdaftar di master — tambahkan dulu di bagian bawah.</p>` : ""}
+      ${bolehKelola ? `
+      <div class="section-title" style="margin-top:20px">Kelola Master &amp; Stok BHP/Alkes</div>
+      <div class="grid cols2">
+        <div class="card">
+          <label>Tambah Item Baru</label>
+          <input id="bhpKodeBaru" placeholder="Kode (cth: KASA01)">
+          <input id="bhpNamaBaru" placeholder="Nama item" style="margin-top:6px">
+          <input id="bhpKategoriBaru" placeholder="Kategori (cth: Alkes Habis Pakai, APD)" style="margin-top:6px">
+          <input id="bhpSatuanBaru" placeholder="Satuan (cth: pcs, box)" style="margin-top:6px">
+          <div class="row" style="margin-top:6px"><input id="bhpStokAwal" type="number" placeholder="Stok awal"><input id="bhpStokMin" type="number" placeholder="Stok minimal"></div>
+          <button class="btn sm" style="margin-top:6px" onclick="submitTambahBhpBaru()">Tambah Item</button>
+        </div>
+        <div class="card">
+          <label>Tambah Stok (item sudah ada)</label>
+          <select id="bhpKodeTambahStok"><option value="">-- Pilih Item --</option>${bhpOptions}</select>
+          <input id="bhpJumlahTambah" type="number" placeholder="Jumlah tambahan" style="margin-top:6px">
+          <input id="bhpKetTambah" placeholder="Keterangan (cth: pembelian rutin)" style="margin-top:6px">
+          <button class="btn sm" style="margin-top:6px" onclick="submitTambahStokBhp()">Tambah Stok</button>
+        </div>
+      </div>` : ""}
+      <div class="section-title" style="margin-top:16px">Daftar Stok BHP/Alkes</div>
+      ${pjTable(bhpRows, ['kode','nama','kategori','satuan','stok','stokMinimal','statusStok'])}`;
   }
+}
+async function bhpCatatPemakaian(){
+  const kode = val('bhp_kode');
+  if(!kode){ toast('Pilih item dulu'); return; }
+  const jumlah = Number(val('bhp_jumlah'))||0;
+  if(jumlah <= 0){ toast('Jumlah harus lebih dari 0'); return; }
+  const r = await api('bhp.catatPemakaian', {kode, jumlah, unitTujuan: val('bhp_unit'), kunjunganId: val('bhp_kunjungan'), keterangan: val('bhp_ket')}, 'POST');
+  if(r.ok){ toast('Pemakaian tercatat'); renderPenunjangTab('bhp'); } else toast(r.msg || 'Gagal mencatat pemakaian');
+}
+async function submitTambahBhpBaru(){
+  const r = await api('bhp.tambahMaster', {
+    kode: val('bhpKodeBaru'), nama: val('bhpNamaBaru'), kategori: val('bhpKategoriBaru'), satuan: val('bhpSatuanBaru'),
+    stokAwal: Number(val('bhpStokAwal'))||0, stokMinimal: Number(val('bhpStokMin'))||0
+  }, 'POST');
+  if(r.ok){ toast('Item BHP/Alkes baru ditambahkan'); renderPenunjangTab('bhp'); } else toast(r.msg || 'Gagal menambah item');
+}
+async function submitTambahStokBhp(){
+  const kode = val('bhpKodeTambahStok');
+  if(!kode){ toast('Pilih item dulu'); return; }
+  const r = await api('bhp.tambahStok', {kode, jumlah:Number(val('bhpJumlahTambah'))||0, keterangan: val('bhpKetTambah')}, 'POST');
+  if(r.ok){ toast('Stok ditambahkan'); renderPenunjangTab('bhp'); } else toast(r.msg || 'Gagal menambah stok');
 }
 
 /* ===== Gizi: tandai sudah disajikan ===== */
