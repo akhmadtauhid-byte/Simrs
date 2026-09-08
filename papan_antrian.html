@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Papan Antrian — RSU Allam Medica</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#0b1c2c; --card:#12293f; --line:#1f3b57; --teal:#2dd4bf; --teal-dk:#0f766e;
+    --amber:#fbbf24; --red:#f87171; --text:#e6f1f8; --sub:#9db3c6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;min-height:100vh;}
+  header{padding:24px 40px;text-align:center;border-bottom:2px solid var(--line);}
+  header h1{margin:0;font-size:2.2rem;letter-spacing:1px;}
+  header p{margin:6px 0 0;color:var(--sub);font-size:1.1rem;}
+  .jam{font-size:1.4rem;color:var(--teal);margin-top:8px;font-variant-numeric:tabular-nums;}
+  main{display:grid;grid-template-columns:1.2fr 1fr;gap:0;min-height:calc(100vh - 140px);}
+  .panel-dipanggil{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;border-right:2px solid var(--line);}
+  .panel-dipanggil .label{font-size:1.6rem;color:var(--sub);letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;}
+  .no-besar{font-size:11rem;font-weight:800;line-height:1;color:var(--teal);text-shadow:0 0 40px rgba(45,212,191,.35);}
+  .poli-besar{font-size:2.4rem;margin-top:16px;color:var(--text);text-align:center;}
+  .kosong{font-size:2rem;color:var(--sub);text-align:center;}
+  .panel-daftar{padding:32px 40px;overflow-y:auto;}
+  .panel-daftar h2{margin:0 0 16px;font-size:1.4rem;color:var(--sub);letter-spacing:1px;text-transform:uppercase;}
+  table{width:100%;border-collapse:collapse;font-size:1.3rem;}
+  th{text-align:left;color:var(--sub);font-weight:600;padding:10px 8px;border-bottom:2px solid var(--line);}
+  td{padding:12px 8px;border-bottom:1px solid var(--line);}
+  .badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:1rem;font-weight:700;}
+  .badge.menunggu{background:rgba(251,191,36,.15);color:var(--amber);}
+  .badge.dipanggil{background:rgba(45,212,191,.18);color:var(--teal);}
+  .empty{color:var(--sub);text-align:center;padding:40px;font-size:1.2rem;}
+  footer{text-align:center;padding:14px;color:var(--sub);font-size:.9rem;border-top:1px solid var(--line);}
+  @media (max-width:900px){
+    main{grid-template-columns:1fr;}
+    .panel-dipanggil{border-right:none;border-bottom:2px solid var(--line);}
+    .no-besar{font-size:7rem;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏥 RSU Allam Medica</h1>
+  <p>Papan Informasi Antrian</p>
+  <div class="jam" id="jam">--:--:--</div>
+</header>
+<main>
+  <div class="panel-dipanggil" id="panelDipanggil">
+    <div class="label">Sedang Dipanggil</div>
+    <div class="kosong">Memuat...</div>
+  </div>
+  <div class="panel-daftar">
+    <h2>Daftar Antrian Hari Ini</h2>
+    <div id="daftarAntrian">Memuat...</div>
+  </div>
+</main>
+<footer>Layar ini diperbarui otomatis setiap beberapa detik — tidak menampilkan nama pasien untuk menjaga kerahasiaan data.</footer>
+<script>
+// ============================================================================
+// PAPAN ANTRIAN PUBLIK — halaman ini SENGAJA terpisah dari index.html dan
+// TIDAK memerlukan login sama sekali (dipasang di layar TV ruang tunggu).
+// Memanggil fn_antrian_display LANGSUNG (bukan lewat api_dispatch) memakai
+// anon key yang memang publik/tertanam di halaman ini — fungsi itu sendiri
+// hanya mengembalikan noAntrian/poliRuangan/statusAntrian, TIDAK PERNAH nama
+// pasien/No. RM/NIK, supaya aman ditampilkan di layar umum.
+// ============================================================================
+const SUPABASE_URL = "https://cduhicndsaeuxstpxthh.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkdWhpY25kc2FldXhzdHB4dGhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjE5MzMsImV4cCI6MjEwNDA5NzkzM30.oBEx-UxyglaQykDpzeZTCDNQXU5x-mQRQjZNlx3SXBM";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const POLLING_MS = 5000;
+
+function updateJam(){
+  document.getElementById("jam").textContent = new Date().toLocaleString('id-ID', {dateStyle:'full', timeStyle:'medium'});
+}
+setInterval(updateJam, 1000);
+updateJam();
+
+async function muatAntrian(){
+  try{
+    const { data, error } = await supabase.rpc('fn_antrian_display', { p: {} });
+    if(error || !data || !data.ok){
+      document.getElementById("panelDipanggil").innerHTML = `<div class="label">Sedang Dipanggil</div><div class="kosong">Gagal memuat data. Mencoba lagi...</div>`;
+      return;
+    }
+    const sd = data.sedangDipanggil;
+    document.getElementById("panelDipanggil").innerHTML = sd
+      ? `<div class="label">Sedang Dipanggil</div><div class="no-besar">${sd.noAntrian}</div><div class="poli-besar">${sd.poliRuangan || ''}</div>`
+      : `<div class="label">Sedang Dipanggil</div><div class="kosong">Belum ada nomor yang dipanggil</div>`;
+
+    const list = data.antrian || [];
+    const box = document.getElementById("daftarAntrian");
+    if(!list.length){
+      box.innerHTML = `<div class="empty">Belum ada antrian hari ini.</div>`;
+      return;
+    }
+    box.innerHTML = `<table><tr><th>No.</th><th>Poli/Ruangan</th><th>Status</th></tr>
+      ${list.map(a => `<tr>
+        <td><b>${a.noAntrian || '-'}</b></td>
+        <td>${a.poliRuangan || '-'}</td>
+        <td><span class="badge ${a.statusAntrian === 'Dipanggil' ? 'dipanggil' : 'menunggu'}">${a.statusAntrian}</span></td>
+      </tr>`).join("")}
+    </table>`;
+  }catch(e){
+    document.getElementById("panelDipanggil").innerHTML = `<div class="label">Sedang Dipanggil</div><div class="kosong">Gagal memuat data. Mencoba lagi...</div>`;
+  }
+}
+
+muatAntrian();
+setInterval(muatAntrian, POLLING_MS);
+</script>
+</body>
+</html>
