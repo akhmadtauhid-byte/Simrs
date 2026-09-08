@@ -2524,11 +2524,11 @@ async function renderPenunjangTab(tab){
     body.innerHTML = `
       <div class="section-title">Buat Order ${label} Baru</div>
       <div style="position:relative;"><label>No. RM</label>
-        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint')" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{unitAsalId:'pj_unit'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{unitAsalId:'pj_unit'})">
         <div id="pj_saranPasien" class="suggest-box"></div>
       </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
-      <label>Unit Asal</label><input id="pj_unit">
+      <label>Unit Asal</label><input id="pj_unit" placeholder="Terisi otomatis dari lokasi pasien saat ini — boleh diubah kalau perlu">
       <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="${tab==='lab'?'Darah Rutin, dll':'Rontgen Thorax, dll'}">
       <label>Dokter Pengirim</label><input id="pj_dokter">
       <label>Harga (Rp)</label><input id="pj_harga" type="number">
@@ -2840,7 +2840,11 @@ async function pilihPasienPenunjang(rmId, boxId, namaId, hintId, opt, rm){
    salah ketik. Sekarang begitu No. RM yang benar diketik, Nama Pasien terisi
    otomatis & dikunci (tidak bisa diketik ulang) supaya datanya pasti benar
    bersumber dari catatan pasien, bukan ketikan manual. Untuk Gizi, Alergi &
-   saran Ruang/Kelas ikut terisi otomatis kalau pasien sedang rawat inap. */
+   saran Ruang/Kelas ikut terisi otomatis kalau pasien sedang rawat inap.
+   Untuk Lab/Radiologi, "Unit Asal" ikut disarankan otomatis berdasarkan
+   lokasi pasien saat ini (ruangan kalau rawat inap, "IGD" kalau kunjungan
+   aktifnya IGD, atau nama poli kalau rawat jalan) — tetap boleh diubah
+   manual kalau ternyata beda (mis. sampel dikirim dari unit lain). */
 async function cariPasienOtomatis(rmId, namaId, hintId, opt){
   opt = opt || {};
   const rm = val(rmId).trim();
@@ -2870,6 +2874,13 @@ async function cariPasienOtomatis(rmId, namaId, hintId, opt){
         } else {
           ruangEl.value = "";
         }
+      }
+    }
+    if(opt.unitAsalId){
+      const unitEl = document.getElementById(opt.unitAsalId);
+      if(unitEl && hasil.unitAsalSaran){
+        unitEl.value = hasil.unitAsalSaran;
+        pesan += " — Unit Asal otomatis: " + hasil.unitAsalSaran;
       }
     }
     if(hintEl) hintEl.textContent = pesan;
