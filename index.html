@@ -85,6 +85,7 @@
   .cbg-result b.code{font-size:22px;color:var(--teal-dk);}
   .flag-item{padding:8px 10px;border-radius:7px;font-size:12.5px;margin-bottom:6px;}
   .flag-item.warn{background:var(--amber-lt);color:#7a4d16;}
+  .flag-item.danger{background:var(--red-lt);color:var(--red);}
   .config-note{background:var(--amber-lt);border:1px solid var(--amber);color:#7a4d16;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px;}
   .suggest-box{position:absolute;z-index:20;background:#fff;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow-y:auto;width:100%;box-shadow:0 6px 18px rgba(0,0,0,.1);display:none;}
   .suggest-box.show{display:block;}
@@ -185,6 +186,7 @@ const NAV = [
 {id:"ikp", label:"⚠️ Lapor Insiden (IKP)", step:null},
 {id:"keluhan", label:"💬 Keluhan & Kepuasan Pasien", step:null},
 {id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null},
+{id:"suratketerangan", label:"📄 Surat Keterangan", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -197,18 +199,18 @@ const ROLE_ACCESS = {
   // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
   // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
-  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
+  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan"],
   perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
-verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif"],
+verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan"],
 };
 // Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
 // bisa mencentang modul satu per satu per staf lewat halaman "Kelola Hak
 // Akses". Satu modul bisa membuka lebih dari satu menu (mis. modul lab/rad/
 // farmasi/gizi/cssd/linen semuanya membuka menu "penunjang" yang sama).
 const MODUL_KE_NAV = {
-  pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal"], rekammedis:["rekammedis","cppt","asesmenawal"],
-  billing:["billing"], inacbg:["inacbg"], pulang:["pulang"], rekap:["rekap"], aturanba:["aturanba"],
+  pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
+  billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"]
 };
@@ -956,7 +958,8 @@ function render(){
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
-    ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar
+    ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
+    suratketerangan: pageSuratKeterangan
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1865,10 +1868,64 @@ async function pageCPPT(el){
     </div>
   </div>
   <div class="section-title">Linimasa Catatan Perkembangan (CPPT)</div>
-  <div id="riwayatCPPT" class="empty">Memuat...</div>`;
+  <div id="riwayatCPPT" class="empty">Memuat...</div>
+  <div class="section-title" style="margin-top:16px">🔄 Serah Terima (Timbang Terima) Shift Perawat</div>
+  <p class="hint">Sasaran Keselamatan Pasien 2 (Komunikasi Efektif) — dicatat setiap pergantian shift jaga. Catatan yang sudah tersimpan tidak bisa diubah/dihapus.</p>
+  <div class="card">
+    <div class="row"><div><label>Shift Dari</label><select id="ttShiftDari"><option value="">-- Pilih --</option><option>Pagi</option><option>Siang</option><option>Malam</option></select></div>
+      <div><label>Shift Ke</label><select id="ttShiftKe"><option value="">-- Pilih --</option><option>Pagi</option><option>Siang</option><option>Malam</option></select></div></div>
+    <label>Kondisi Pasien</label><textarea id="ttKondisi" placeholder="cth: Stabil, demam turun"></textarea>
+    <label>Masalah Keperawatan (opsional)</label><textarea id="ttMasalah" placeholder="cth: Risiko jatuh sedang"></textarea>
+    <label>Intervensi Belum Selesai (opsional)</label><textarea id="ttIntervensi" placeholder="cth: Pemberian antibiotik jam 14.00 belum dilakukan"></textarea>
+    <label>Rencana Tindak Lanjut (opsional)</label><textarea id="ttRencana" placeholder="cth: Lanjutkan observasi suhu tiap 4 jam"></textarea>
+    <label>Hal Khusus yang Perlu Diwaspadai (opsional)</label><textarea id="ttWaspada" placeholder="cth: Riwayat alergi penisilin"></textarea>
+    <div class="row"><div><label>Nama Pemberi Shift</label><input id="ttPemberi"></div>
+      <div><label>Nama Penerima Shift</label><input id="ttPenerima"></div></div>
+    <button class="btn" style="margin-top:10px" onclick="submitTimbangTerima()">Simpan Serah Terima</button>
+  </div>
+  <div class="section-title" style="margin-top:12px">Riwayat Serah Terima</div>
+  <div id="riwayatTimbangTerima" class="empty">Memuat...</div>`;
 
   await muatRiwayatTandaVital();
   await muatRiwayatCPPT();
+  await muatRiwayatTimbangTerima();
+}
+async function muatRiwayatTimbangTerima(){
+  const box = document.getElementById("riwayatTimbangTerima");
+  if(!box) return;
+  const r = await api("timbangTerima.daftarKunjungan", {kunjunganId: state.activeKunjunganId}, "POST");
+  const list = Array.isArray(r) ? r : (r.data || []);
+  if(!list.length){ box.innerHTML = `<div class="empty">Belum ada catatan serah terima untuk kunjungan ini</div>`; return; }
+  box.innerHTML = list.map(t => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>Shift ${t.shiftDari} → ${t.shiftKe}</b> — ${t.namaPemberi} ➜ ${t.namaPenerima}</div>
+        <span class="hint">${new Date(t.waktuDicatat).toLocaleString('id-ID')}</span>
+      </div>
+      <div style="margin-top:6px"><b>Kondisi Pasien:</b> ${t.kondisiPasien}</div>
+      ${t.masalahKeperawatan ? `<div style="margin-top:4px"><b>Masalah Keperawatan:</b> ${t.masalahKeperawatan}</div>` : ""}
+      ${t.intervensiBelumSelesai ? `<div style="margin-top:4px"><b>Intervensi Belum Selesai:</b> ${t.intervensiBelumSelesai}</div>` : ""}
+      ${t.rencanaTindakLanjut ? `<div style="margin-top:4px"><b>Rencana Tindak Lanjut:</b> ${t.rencanaTindakLanjut}</div>` : ""}
+      ${t.halKhususDiwaspadai ? `<div class="flag-item warn" style="margin-top:6px">⚠️ ${t.halKhususDiwaspadai}</div>` : ""}
+      <div class="hint" style="margin-top:4px">Dicatat oleh ${t.dicatatOleh||"-"}</div>
+    </div>`).join("");
+}
+async function submitTimbangTerima(){
+  if(!val("ttShiftDari") || !val("ttShiftKe")){ toast("Pilih Shift Dari & Shift Ke"); return; }
+  if(!val("ttKondisi")){ toast("Kondisi pasien wajib diisi"); return; }
+  if(!val("ttPemberi") || !val("ttPenerima")){ toast("Nama pemberi & penerima shift wajib diisi"); return; }
+  const r = await api("timbangTerima.tambah", {
+    kunjunganId: state.activeKunjunganId, shiftDari: val("ttShiftDari"), shiftKe: val("ttShiftKe"),
+    kondisiPasien: val("ttKondisi"), masalahKeperawatan: val("ttMasalah"),
+    intervensiBelumSelesai: val("ttIntervensi"), rencanaTindakLanjut: val("ttRencana"),
+    halKhususDiwaspadai: val("ttWaspada"), namaPemberi: val("ttPemberi"), namaPenerima: val("ttPenerima")
+  }, "POST");
+  if(r.ok){
+    toast("Serah terima shift disimpan");
+    ["ttKondisi","ttMasalah","ttIntervensi","ttRencana","ttWaspada","ttPemberi","ttPenerima"].forEach(id=>document.getElementById(id).value="");
+    document.getElementById("ttShiftDari").value=""; document.getElementById("ttShiftKe").value="";
+    await muatRiwayatTimbangTerima();
+  } else toast(r.msg || "Gagal menyimpan serah terima");
 }
 async function muatRiwayatTandaVital(){
   const box = document.getElementById("riwayatTandaVital");
@@ -1945,7 +2002,19 @@ async function submitCPPT(){
 
 async function pageBilling(el){
   const strip = await patientStrip(state.activeKunjunganId);
-  el.innerHTML = `<h1>Billing</h1><p class="sub">Langkah 4 — catat semua biaya riil (jasa sarana, jasa pelayanan, obat, BHP, dsb) untuk dibandingkan dengan prediksi tarif INA-CBG</p>${strip}`;
+  el.innerHTML = `<h1>Billing</h1><p class="sub">Langkah 4 — catat semua biaya riil (jasa sarana, jasa pelayanan, obat, BHP, dsb) untuk dibandingkan dengan prediksi tarif INA-CBG</p>
+    <div class="card" style="margin-bottom:14px">
+      <div class="section-title">💰 Laporan Kas Harian / Tutup Kas</div>
+      <p class="hint">Rekap seluruh transaksi pembayaran (semua pasien) pada rentang tanggal tertentu — dipakai kasir untuk mencocokkan uang fisik di laci kas dengan catatan sistem sebelum tutup kas/pergantian shift.</p>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="kh_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="kh_sampai" type="date"></div>
+      </div>
+      <button class="btn" onclick="muatLaporanKasHarian()">Tampilkan</button>
+      <div id="laporanKasHarianBody" style="margin-top:14px">Memuat...</div>
+    </div>
+    ${strip}`;
+  await muatLaporanKasHarian();
   if(!state.activeKunjunganId) return;
   const d = window.__detail;
   const total = d.billing.reduce((s,r)=>s+Number(r.Total||0),0);
@@ -2006,6 +2075,32 @@ async function pageBilling(el){
 function togglePyTunai(){
   const el = document.getElementById("areaPyTunai");
   if(el) el.style.display = val("pyMetode")==="Tunai" ? "block" : "none";
+}
+async function muatLaporanKasHarian(){
+  const box = document.getElementById("laporanKasHarianBody");
+  if(!box) return;
+  const r = await api("kas.laporanHarian", {dari: val("kh_dari"), sampai: val("kh_sampai")}, "POST");
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || "Gagal memuat laporan kas"}</div>`; return; }
+  const ringkasan = r.ringkasanMetode || [];
+  const detail = r.detailTransaksi || [];
+  box.innerHTML = `
+    <div class="grid cols3" style="margin-bottom:12px">
+      <div class="card stat"><b>Rp${Number(r.totalKeseluruhan||0).toLocaleString('id-ID')}</b><span>Total Diterima (${r.dari} s/d ${r.sampai})</span></div>
+      <div class="card stat"><b>${r.jumlahTransaksiBerlaku ?? 0}</b><span>Transaksi Berlaku</span></div>
+      <div class="card stat"><b>${r.jumlahTransaksiDibatalkan ?? 0}</b><span>Transaksi Dibatalkan</span></div>
+    </div>
+    <div class="section-title">Ringkasan per Metode Bayar</div>
+    ${ringkasan.length ? `<table><tr><th>Metode Bayar</th><th>Jumlah Transaksi</th><th>Total Diterima</th></tr>
+      ${ringkasan.map(x=>`<tr><td>${x.metodeBayar}</td><td>${x.jumlahTransaksi}</td><td>Rp${Number(x.totalDiterima).toLocaleString('id-ID')}</td></tr>`).join("")}
+    </table>` : `<div class="empty">Tidak ada transaksi pada rentang ini</div>`}
+    <div class="section-title" style="margin-top:12px">Detail Transaksi</div>
+    ${detail.length ? `<table><tr><th>No. Kuitansi</th><th>Waktu</th><th>Pasien</th><th>Kunjungan</th><th>Metode</th><th>Jumlah</th><th>Status</th><th>Dicatat Oleh</th></tr>
+      ${detail.map(x=>`<tr>
+        <td>${x.noKuitansi}</td><td>${new Date(x.waktuBayar).toLocaleString('id-ID')}</td><td>${x.namaPasien||"-"}</td><td>${x.kunjunganId||"-"}</td>
+        <td>${x.metodeBayar}</td><td>Rp${Number(x.jumlahBayar).toLocaleString('id-ID')}</td>
+        <td><span class="badge ${x.status==='Dibatalkan'?'danger':'ok'}">${x.status}</span></td><td>${x.dicatatOleh||"-"}</td>
+      </tr>`).join("")}
+    </table>` : `<div class="empty">Tidak ada transaksi pada rentang ini</div>`}`;
 }
 async function submitBilling(){
   const r = await api("tambahBilling", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kategori:val("kategori"), Kategori:val("kategori"), deskripsi:val("deskBilling"), Deskripsi:val("deskBilling"), qty:val("qty"), Qty:val("qty"), tarifSatuan:val("tarifSatuan"), TarifSatuan:val("tarifSatuan")}, "POST");
@@ -2239,6 +2334,95 @@ async function tampilkanCetak(kunjunganId){
     </div>
     <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>
   `;
+}
+
+/* ============ SURAT KETERANGAN SEHAT/SAKIT ============
+   Dokumen administrasi harian yang terpisah dari Resume Medis/Kuitansi/Surat
+   Rujukan — dibuat per kunjungan, bernomor otomatis & berurutan, tidak bisa
+   diubah/dihapus setelah tersimpan (pola sama seperti dokumen legal lain). */
+async function pageSuratKeterangan(el){
+  const strip = await patientStrip(state.activeKunjunganId);
+  el.innerHTML = `<h1>Surat Keterangan Sehat/Sakit</h1><p class="sub">Buat surat keterangan untuk pasien pada kunjungan yang sedang dipilih. Nomor surat dibuat otomatis & berurutan. Setelah tersimpan, surat tidak bisa diubah/dihapus — kalau ada kesalahan, buat surat baru dan catat sebagai koreksi.</p>${strip}`;
+  if(!state.activeKunjunganId) return;
+  el.innerHTML += `<div class="card">
+    <div class="section-title">Buat Surat Keterangan Baru</div>
+    <label>Jenis Surat</label>
+    <select id="skJenis" onchange="toggleFormIstirahat()">
+      <option value="">-- Pilih --</option>
+      <option value="Sehat">Keterangan Sehat</option>
+      <option value="Sakit">Keterangan Sakit</option>
+    </select>
+    <label>Keperluan (opsional)</label><input id="skKeperluan" placeholder="cth: Untuk keperluan kerja / melamar kerja">
+    <label>Diagnosa (opsional)</label><input id="skDiagnosa" placeholder="cth: ISPA">
+    <div id="areaSkIstirahat" style="display:none">
+      <div class="row"><div><label>Istirahat Mulai</label><input id="skIstirahatMulai" type="date"></div>
+        <div><label>Istirahat Sampai</label><input id="skIstirahatSampai" type="date"></div></div>
+    </div>
+    <label>Dokter Pemeriksa</label><input id="skDokter" placeholder="cth: dr. Andi">
+    <button class="btn" style="margin-top:10px" onclick="submitSuratKeterangan()">Simpan &amp; Buat Nomor Surat</button>
+    <div class="hint" id="hasilSuratKeterangan" style="margin-top:8px"></div>
+  </div>
+  <div class="section-title" style="margin-top:14px">Riwayat Surat Keterangan Kunjungan Ini</div>
+  <div id="riwayatSuratKeterangan" class="empty">Memuat...</div>
+  <div id="areaCetakSuratKeterangan" style="margin-top:14px"></div>`;
+  toggleFormIstirahat();
+  await muatRiwayatSuratKeterangan();
+}
+function toggleFormIstirahat(){
+  const el = document.getElementById("areaSkIstirahat");
+  if(el) el.style.display = val("skJenis")==="Sakit" ? "block" : "none";
+}
+async function muatRiwayatSuratKeterangan(){
+  const box = document.getElementById("riwayatSuratKeterangan");
+  if(!box) return;
+  const r = await api("suratKeterangan.daftarKunjungan", {kunjunganId: state.activeKunjunganId}, "POST");
+  const list = Array.isArray(r) ? r : (r.data || []);
+  if(!list.length){ box.innerHTML = `<div class="empty">Belum ada surat keterangan untuk kunjungan ini</div>`; return; }
+  box.innerHTML = `<table><tr><th>No. Surat</th><th>Jenis</th><th>Keperluan</th><th>Dokter Pemeriksa</th><th>Dibuat</th><th>Dicatat Oleh</th><th></th></tr>
+    ${list.map(x=>`<tr>
+      <td>${x.nomorSurat}</td><td>${x.jenis}</td><td>${x.keperluan||"-"}</td><td>${x.dokterPemeriksa||"-"}</td>
+      <td>${new Date(x.waktuDibuat).toLocaleString('id-ID')}</td><td>${x.dicatatOleh||"-"}</td>
+      <td><button class="btn sm ghost" onclick="tampilkanCetakSuratKeterangan('${x.nomorSurat}')">🖨️ Cetak</button></td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function submitSuratKeterangan(){
+  if(!val("skJenis")){ toast("Pilih jenis surat dulu"); return; }
+  if(!val("skDokter")){ toast("Nama dokter pemeriksa wajib diisi"); return; }
+  const r = await api("suratKeterangan.buat", {
+    kunjunganId: state.activeKunjunganId, jenis: val("skJenis"), keperluan: val("skKeperluan"),
+    diagnosa: val("skDiagnosa"), istirahatMulai: val("skIstirahatMulai"), istirahatSampai: val("skIstirahatSampai"),
+    dokterPemeriksa: val("skDokter")
+  }, "POST");
+  if(r.ok){
+    toast("Surat keterangan tersimpan — No. " + r.nomorSurat);
+    document.getElementById("hasilSuratKeterangan").innerHTML = `✅ Surat berhasil dibuat dengan Nomor <b>${r.nomorSurat}</b>`;
+    await muatRiwayatSuratKeterangan();
+    tampilkanCetakSuratKeterangan(r.nomorSurat);
+  } else toast(r.msg || "Gagal membuat surat keterangan");
+}
+async function tampilkanCetakSuratKeterangan(nomorSurat){
+  const d = await api("getKunjunganDetail", {id: state.activeKunjunganId}, "GET");
+  if(!d.ok){ toast("Gagal memuat data"); return; }
+  const sk = (d.suratKeterangan||[]).find(x=>x.nomorSurat===nomorSurat);
+  if(!sk){ toast("Data surat tidak ditemukan"); return; }
+  const p = d.pasien||{};
+  document.getElementById("areaCetakSuratKeterangan").innerHTML = `
+    <div class="resep-print">
+      <h2>RSU Allam Medica</h2>
+      <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Surat Keterangan ${sk.jenis}</div>
+      <div class="grid cols2" style="margin-bottom:10px;">
+        <div><b>No. Surat:</b> ${sk.nomorSurat}<br><b>Nama Pasien:</b> ${p.nama||p.Nama||"-"}<br><b>No. RM:</b> ${p.RM||"-"}</div>
+        <div><b>Tanggal Diterbitkan:</b> ${new Date(sk.waktuDibuat).toLocaleDateString('id-ID')}<br><b>Dokter Pemeriksa:</b> ${sk.dokterPemeriksa||"-"}</div>
+      </div>
+      <table>
+        ${sk.keperluan ? `<tr><th>Keperluan</th><td>${sk.keperluan}</td></tr>` : ""}
+        ${sk.diagnosa ? `<tr><th>Diagnosa</th><td>${sk.diagnosa}</td></tr>` : ""}
+        ${(sk.istirahatMulai || sk.istirahatSampai) ? `<tr><th>Masa Istirahat</th><td>${sk.istirahatMulai ? new Date(sk.istirahatMulai).toLocaleDateString('id-ID') : "-"} s/d ${sk.istirahatSampai ? new Date(sk.istirahatSampai).toLocaleDateString('id-ID') : "-"}</td></tr>` : ""}
+      </table>
+      <p class="hint" style="margin-top:10px">Surat ini diterbitkan oleh ${sk.dicatatOleh||"-"} berdasarkan pemeriksaan dokter tersebut di atas, dan berlaku sesuai keperluan yang tercantum.</p>
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>`;
 }
 
 async function pageRekap(el){
@@ -2729,16 +2913,50 @@ function renderOrderList(rows, jenis, bolehIsiHasil){
       ${r.hasil ? `
         <div style="margin-top:6px"><b>Hasil:</b> ${r.hasil}</div>
         <div class="hint">Diisi oleh ${r.namaPengisiHasil||"-"} (${r.profesiPengisiHasil||"-"}), ${new Date(r.waktuHasil).toLocaleString('id-ID')}</div>
+        ${r.nilaiKritis ? `
+          <div class="flag-item danger" style="margin-top:8px">
+            ⚠️ NILAI KRITIS — sudah diberitahukan ke <b>${r.diberitahukanKepada||"-"}</b> lewat ${r.metodePemberitahuan||"-"}, ${r.waktuPemberitahuan ? new Date(r.waktuPemberitahuan).toLocaleString('id-ID') : "-"}.
+            ${r.dikonfirmasiBacaUlang ? " Sudah dikonfirmasi baca ulang (read-back)." : " Belum dikonfirmasi baca ulang (read-back)."}
+            ${r.catatanKritis ? `<div style="margin-top:4px">Catatan: ${r.catatanKritis}</div>` : ""}
+          </div>` : ""}
       ` : (bolehIsiHasil ? `
         <textarea id="hasil_${r.ID_Order}" placeholder="Tulis hasil pemeriksaan di sini..." style="margin-top:8px"></textarea>
+        <label style="margin-top:8px"><input type="checkbox" id="kritis_${r.ID_Order}" onchange="toggleFormKritis('${r.ID_Order}')"> ⚠️ Tandai sebagai Nilai Kritis (wajib segera diberitahukan ke DPJP)</label>
+        <div id="areaKritis_${r.ID_Order}" style="display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <label>Diberitahukan Kepada (nama DPJP/dokter jaga)</label>
+          <input id="kritisKepada_${r.ID_Order}" placeholder="cth: dr. Andi (DPJP)">
+          <label>Metode Pemberitahuan</label>
+          <select id="kritisMetode_${r.ID_Order}">
+            <option value="">-- Pilih --</option>
+            <option value="Telepon">Telepon</option>
+            <option value="Lisan Langsung">Lisan Langsung</option>
+            <option value="Lainnya">Lainnya</option>
+          </select>
+          <label style="margin-top:8px"><input type="checkbox" id="kritisBacaUlang_${r.ID_Order}"> Sudah dikonfirmasi baca ulang (read-back) oleh penerima</label>
+          <label>Catatan Tambahan (opsional)</label>
+          <textarea id="kritisCatatan_${r.ID_Order}" placeholder="cth: pasien harus segera dievaluasi ulang"></textarea>
+        </div>
         <button class="btn sm" style="margin-top:6px" onclick="isiHasilPemeriksaan('${jenis}','${r.ID_Order}')">Simpan Hasil</button>
       ` : `<div class="hint" style="margin-top:6px">Belum ada hasil</div>`)}
     </div>`).join("");
 }
+function toggleFormKritis(orderId){
+  const el = document.getElementById('areaKritis_'+orderId);
+  const cek = document.getElementById('kritis_'+orderId);
+  if(el && cek) el.style.display = cek.checked ? 'block' : 'none';
+}
 async function isiHasilPemeriksaan(jenis, orderId){
   const hasil = val('hasil_'+orderId);
   if(!hasil){ toast('Isi hasil pemeriksaan dulu'); return; }
-  const r = await api(jenis+'.isiHasil', {orderId, hasil}, 'POST');
+  const nilaiKritis = document.getElementById('kritis_'+orderId) ? document.getElementById('kritis_'+orderId).checked : false;
+  const payload = {orderId, hasil, nilaiKritis};
+  if(nilaiKritis){
+    payload.diberitahukanKepada = val('kritisKepada_'+orderId);
+    payload.metodePemberitahuan = val('kritisMetode_'+orderId);
+    payload.dikonfirmasiBacaUlang = document.getElementById('kritisBacaUlang_'+orderId).checked;
+    payload.catatanKritis = val('kritisCatatan_'+orderId);
+  }
+  const r = await api(jenis+'.isiHasil', payload, 'POST');
   if(r.ok){ toast('Hasil tersimpan'); renderPenunjangTab(jenis); } else toast(r.msg || 'Gagal menyimpan hasil');
 }
 
@@ -3003,12 +3221,40 @@ async function pageDashboardMutu(el){
     ${['KNC','KTC','KTD','KPC','Sentinel'].map(j=>`<div class="card stat"><b>${insiden[j]||0}</b><span>${j}</span></div>`).join("")}
   </div>
   <p class="hint" style="margin-top:12px">💡 Lihat detail tiap laporan insiden di menu "⚠️ Lapor Insiden (IKP)". Daftar pasien yang perlu direasesmen ada di halaman Dashboard utama.</p>
+  <div class="card" style="margin-top:16px">
+    <div class="section-title">🔴 Kepatuhan Notifikasi Nilai Kritis (Lab &amp; Radiologi)</div>
+    <p class="hint">Setiap hasil Lab/Radiologi yang ditandai Nilai Kritis wajib segera diberitahukan ke DPJP — daftar ini menunjukkan siapa yang diberitahu, lewat metode apa, berapa lama jeda dari hasil keluar sampai diberitahukan, dan apakah sudah dikonfirmasi baca ulang (read-back).</p>
+    <div class="row">
+      <div><label>Dari Tanggal</label><input id="nk_dari" type="date"></div>
+      <div><label>Sampai Tanggal</label><input id="nk_sampai" type="date"></div>
+    </div>
+    <button class="btn" onclick="muatNotifikasiKritis()">Tampilkan</button>
+    <div id="notifikasiKritisBody" style="margin-top:14px">Memuat...</div>
+  </div>
   ${state.user && state.user.role==="admin" ? `<div class="card" style="margin-top:16px">
     <div class="section-title">Pengaturan Interval Reasesmen (khusus admin)</div>
     <p class="hint">Jam maksimal sebelum pasien dengan kategori ini dianggap perlu dinilai ulang. Sesuaikan dengan kebijakan Komite Mutu/PMKP rumah sakit — nilai bawaan di sini hanya titik awal.</p>
     <div id="reasesmenPengaturanBody">Memuat...</div>
   </div>` : ""}`;
+  await muatNotifikasiKritis();
   if(state.user && state.user.role==="admin") await muatPengaturanReasesmen();
+}
+async function muatNotifikasiKritis(){
+  const box = document.getElementById("notifikasiKritisBody");
+  const r = await api("notifikasiKritis.daftar", {dari: val("nk_dari"), sampai: val("nk_sampai")}, "POST");
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || "Gagal memuat laporan kepatuhan Nilai Kritis"}</div>`; return; }
+  const rows = r.data || [];
+  if(!rows.length){ box.innerHTML = `<div class="empty">Tidak ada hasil Nilai Kritis pada rentang ini.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Sumber</th><th>Pasien</th><th>Hasil Kritis</th><th>Waktu Hasil</th><th>Diberitahukan Kepada</th><th>Metode</th><th>Jeda (menit)</th><th>Baca Ulang?</th><th>Dicatat Oleh</th></tr>
+    ${rows.map(x=>`<tr>
+      <td>${x.sumber||"-"}</td><td>${x.namaPasien||"-"}</td><td>${x.hasilKritis||"-"}</td>
+      <td>${x.waktuHasilKritis ? new Date(x.waktuHasilKritis).toLocaleString('id-ID') : "-"}</td>
+      <td>${x.diberitahukanKepada||"-"}</td><td>${x.metodePemberitahuan||"-"}</td>
+      <td style="${(x.durasiMenit||0)>30?'color:var(--red)':''}">${x.durasiMenit ?? "-"}</td>
+      <td>${x.dikonfirmasiBacaUlang ? "✅ Ya" : "❌ Belum"}</td>
+      <td>${x.dicatatOleh||"-"}</td>
+    </tr>`).join("")}
+  </table>`;
 }
 async function muatPengaturanReasesmen(){
   const box = document.getElementById("reasesmenPengaturanBody");
