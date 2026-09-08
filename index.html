@@ -189,6 +189,7 @@ const NAV = [
 {id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null},
 {id:"suratketerangan", label:"📄 Surat Keterangan", step:null},
 {id:"kamaroperasi", label:"🔪 Kamar Operasi", step:null},
+{id:"jadwaljaga", label:"📅 Jadwal Jaga", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -214,7 +215,7 @@ const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
-  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"], ok:["kamaroperasi"]
+  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -238,6 +239,7 @@ const DAFTAR_MODUL = [
   {id:"tarif", label:"Master Tarif"},
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
   {id:"ok", label:"Kamar Operasi (jadwal operasi + checklist keselamatan operasi)"},
+  {id:"jadwaljaga", label:"Jadwal Jaga / Jadwal Dokter (kelola: tambah/ubah/hapus)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -255,7 +257,7 @@ function navAllowed(){
   // "ikp" (Lapor Insiden Keselamatan Pasien) sengaja dibuka untuk SEMUA staf
   // yang login, bukan lewat modul — budaya pelaporan insiden tanpa-menyalahkan
   // hanya berjalan kalau semua orang bisa melapor, bukan hanya yang dicentang.
-  return Array.from(new Set(["dashboard", "ikp", "keluhan", ...daftarLegacy, ...daftarModul]));
+  return Array.from(new Set(["dashboard", "ikp", "keluhan", "jadwaljaga", ...daftarLegacy, ...daftarModul]));
 }
 
 function renderNav(){
@@ -962,7 +964,7 @@ function render(){
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
-    suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi
+    suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1144,7 +1146,9 @@ async function submitKeputusan(igdId){
 async function pageDashboard(el){
   el.innerHTML = `<h1>Dashboard</h1><p class="sub">Ringkasan operasional hari ini</p><div class="grid cols4" id="stats"></div>
     <div class="section-title" style="margin-top:18px">⏰ Pengingat Reasesmen (Risiko Jatuh &amp; EWS)</div>
-    <div id="reasesmenBody" class="empty">Memuat...</div>`;
+    <div id="reasesmenBody" class="empty">Memuat...</div>
+    <div class="section-title" style="margin-top:18px">📅 Jadwal Jaga Hari Ini</div>
+    <div id="jadwalJagaHariIniBody" class="empty">Memuat...</div>`;
   const r = await api("getDashboard", {}, "GET");
   document.getElementById("stats").innerHTML = `
     <div class="card stat"><b>${r.kunjunganHariIni??0}</b><span>Kunjungan Hari Ini</span></div>
@@ -1156,6 +1160,16 @@ async function pageDashboard(el){
     <div class="card stat"><b>${r.tempatTidurTotal ? (r.tempatTidurKosong??0)+"/"+r.tempatTidurTotal : "-"}</b><span>Tempat Tidur Kosong${!r.tempatTidurTotal ? " (belum ada data tempat tidur)" : ""}</span></div>
   `;
   await muatReasesmenDashboard();
+  await muatJadwalJagaHariIni();
+}
+async function muatJadwalJagaHariIni(){
+  const box = document.getElementById("jadwalJagaHariIniBody");
+  if(!box) return;
+  const rows = await api("jadwalJaga.hariIni", {}, "GET");
+  if(!rows || !rows.length){ box.innerHTML = `<div class="empty">Belum ada jadwal jaga untuk hari ini.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Shift</th><th>Unit/Poli</th><th>Petugas</th><th>Peran</th></tr>
+    ${rows.map(j=>`<tr><td>${j.shift}</td><td>${j.unitPoli||'-'}</td><td>${j.nama}</td><td>${j.peran||'-'}</td></tr>`).join("")}
+  </table>`;
 }
 async function muatReasesmenDashboard(){
   const box = document.getElementById("reasesmenBody");
@@ -1453,15 +1467,27 @@ async function muatKunjunganAktif(){
   const rows = await api("getKunjunganAktif", {q: val("kjQ"), jenisKunjungan: val("kjJenis")}, "GET");
   const list = document.getElementById("list");
   if(!rows.length){ list.innerHTML = `<div class="card empty">Tidak ada kunjungan aktif yang cocok. Buat kunjungan baru di menu Pendaftaran, atau ubah kata kunci/filter di atas.</div>`; return; }
+  const bolehPanggil = !DEMO_MODE && state.user && (["admin","pendaftaran","rekam_medis"].includes(state.user.role) || ["pendaftaran","rekammedis","igd"].some(m=>(state.user.modul||[]).includes(m)));
   list.innerHTML = `<div class="card"><table>
-    <tr><th>ID</th><th>RM</th><th>Nama</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th></th></tr>
-    ${rows.map(k=>`<tr>
+    <tr><th>ID</th><th>RM</th><th>Nama</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th>Antrian</th><th></th></tr>
+    ${rows.map(k=>{
+      const noAntrian = k.noAntrian || "-";
+      const statusAntrian = k.statusAntrian || "Menunggu";
+      const antrianBadge = statusAntrian === "Dipanggil" ? `<span class="badge ok">📢 No. ${noAntrian} — Dipanggil</span>` : `<span class="badge warn">No. ${noAntrian} — Menunggu</span>`;
+      const tombolPanggil = bolehPanggil ? `<button class="btn sm ghost" onclick="panggilAntrian('${k.KunjunganID}')">📢 Panggil</button>` : "";
+      return `<tr>
       <td>${k.KunjunganID}</td><td>${k.rm||k.RM}</td><td>${k.nama||k.Nama||"-"}</td><td>${k.jenisKunjungan||k.JenisKunjungan}</td>
       <td>${k.poliRuangan||k.PoliRuangan||"-"}</td><td>${k.dpjp||k.DPJP||"-"}</td>
       <td><span class="badge ok">${k.Status}</span></td>
+      <td>${antrianBadge}${tombolPanggil}</td>
       <td><button class="btn sm" onclick="pilihKunjungan('${k.KunjunganID}')">Pilih →</button></td>
-    </tr>`).join("")}
+    </tr>`;}).join("")}
   </table></div>`;
+}
+async function panggilAntrian(kunjunganId){
+  const r = await api("antrian.panggil", {kunjunganId}, "POST");
+  if(r.ok){ toast(`Nomor antrian ${r.noAntrian} (${r.poliRuangan||"-"}) dipanggil`); muatKunjunganAktif(); }
+  else toast(r.msg || "Gagal memanggil nomor antrian");
 }
 function pilihKunjungan(id){ state.activeKunjunganId = id; goTo("rekammedis"); }
 
@@ -2202,13 +2228,53 @@ async function pageInaCbg(el){
   const strip = await patientStrip(state.activeKunjunganId);
   el.innerHTML = `<h1>Prediksi INA-CBG</h1><p class="sub">Langkah 5 — estimasi kode & tarif CBG berdasarkan diagnosa, tindakan, kelas rawat, dibandingkan dengan billing riil</p>${strip}`;
   if(!state.activeKunjunganId) return;
-  el.innerHTML += `<div class="card"><button class="btn" onclick="jalankanPrediksi()">🔮 Jalankan Prediksi INA-CBG</button></div><div id="hasilCbg" style="margin-top:14px"></div>`;
+  el.innerHTML += `<div class="card"><button class="btn" onclick="jalankanPrediksi()">🔮 Jalankan Prediksi INA-CBG</button></div><div id="hasilCbg" style="margin-top:14px"></div><div id="areaStatusKlaim" style="margin-top:14px"></div>`;
   const d = window.__detail;
-  if(d.klaim) renderHasilCbg(d.klaim);
+  if(d.klaim){ renderHasilCbg(d.klaim); renderStatusKlaim(d.klaim, d.riwayatStatusKlaim); }
 }
 async function jalankanPrediksi(){
   const r = await api("prediksiINACBG", {kunjunganId:state.activeKunjunganId}, "POST");
-  if(r.ok){ renderHasilCbg(r.data); toast("Prediksi selesai"); }
+  if(r.ok){
+    renderHasilCbg(r.data);
+    const riw = await api("klaim.riwayatStatus", {kunjunganId:state.activeKunjunganId}, "GET");
+    renderStatusKlaim(r.data, riw);
+    toast("Prediksi selesai");
+  }
+}
+const DAFTAR_STATUS_KLAIM = ["Draft Prediksi","Diajukan","Pending","Disetujui","Revisi","Ditolak"];
+function renderStatusKlaim(k, riwayat){
+  const box = document.getElementById("areaStatusKlaim");
+  if(!box) return;
+  const statusSekarang = k.StatusKlaim || "Draft Prediksi";
+  box.innerHTML = `<div class="card">
+    <div class="section-title">📋 Status Klaim BPJS</div>
+    <div>Status saat ini: <span class="badge ${statusSekarang==='Disetujui'?'ok':(statusSekarang==='Ditolak'?'danger':'warn')}">${statusSekarang}</span>
+      ${k.NomorPengajuanKlaim ? ` · No. Pengajuan: <b>${k.NomorPengajuanKlaim}</b>` : ""}</div>
+    <label>Ubah Status Menjadi</label>
+    <select id="statusKlaimBaru">${DAFTAR_STATUS_KLAIM.map(s=>`<option ${s===statusSekarang?'selected':''}>${s}</option>`).join("")}</select>
+    <label>Nomor Pengajuan Klaim (opsional, kosongkan jika tidak berubah)</label>
+    <input id="statusKlaimNomorPengajuan" placeholder="cth: SEP atau nomor pengajuan dari aplikasi BPJS">
+    <label>Catatan (opsional)</label>
+    <textarea id="statusKlaimCatatan" placeholder="cth: sudah diajukan lewat aplikasi BPJS, menunggu verifikasi"></textarea>
+    <button class="btn" style="margin-top:8px" onclick="ubahStatusKlaim()">Simpan Perubahan Status</button>
+    <div class="section-title" style="margin-top:16px">Riwayat Perubahan Status</div>
+    ${(!riwayat || !riwayat.length) ? `<div class="empty">Belum ada riwayat perubahan status.</div>` : `<table>
+      <tr><th>Waktu</th><th>Dari</th><th>Ke</th><th>Catatan</th><th>Oleh</th></tr>
+      ${riwayat.map(r=>`<tr><td>${new Date(r.waktu).toLocaleString('id-ID')}</td><td>${r.statusSebelum||'-'}</td><td>${r.statusBaru}</td><td>${r.catatan||'-'}</td><td>${r.diubahOleh||'-'}</td></tr>`).join("")}
+    </table>`}
+  </div>`;
+}
+async function ubahStatusKlaim(){
+  const statusBaru = val("statusKlaimBaru");
+  const nomorPengajuan = val("statusKlaimNomorPengajuan");
+  const catatan = val("statusKlaimCatatan");
+  const r = await api("klaim.updateStatus", {kunjunganId: state.activeKunjunganId, statusBaru, nomorPengajuan, catatan}, "POST");
+  if(r.ok){
+    toast("Status klaim diperbarui");
+    const d = await api("getKunjunganDetail", {id: state.activeKunjunganId}, "GET");
+    window.__detail = d;
+    if(d.klaim) renderStatusKlaim(d.klaim, d.riwayatStatusKlaim);
+  } else toast(r.msg || "Gagal mengubah status klaim");
 }
 function renderHasilCbg(k, targetId){
   const selisih = Number(k.Selisih||k.selisih||0);
@@ -2541,6 +2607,7 @@ async function pageRekap(el){
         <button class="btn" onclick="renderRekapTab('klaim')">Rekap Klaim INA-CBG</button>
         <button class="btn" onclick="renderRekapTab('diagnosa')">Laporan per Diagnosa</button>
         <button class="btn" onclick="renderRekapTab('kematian')">Rekap Kematian</button>
+        <button class="btn" onclick="renderRekapTab('statusklaim')">Rekap Status Klaim</button>
       </div>
       <div id="rekapBody"></div>
     </div>`;
@@ -2584,7 +2651,37 @@ async function renderRekapTab(tab){
     document.getElementById("rk_dari").value = new Date(now.getTime() - 30*86400000).toISOString().slice(0,10);
     document.getElementById("rk_sampai").value = now.toISOString().slice(0,10);
     await muatRekapKematian();
+  } else if (tab === 'statusklaim') {
+    body.innerHTML = `
+      <p class="sub">Rekap status klaim BPJS (Diajukan/Pending/Disetujui/Revisi/Ditolak) berdasarkan tanggal prediksi.</p>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="rsk_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="rsk_sampai" type="date"></div>
+      </div>
+      <button class="btn" onclick="muatRekapStatusKlaim()">Tampilkan</button>
+      <div id="rekapStatusKlaimList" style="margin-top:14px">Memuat...</div>`;
+    const now = new Date();
+    document.getElementById("rsk_dari").value = new Date(now.getTime() - 30*86400000).toISOString().slice(0,10);
+    document.getElementById("rsk_sampai").value = now.toISOString().slice(0,10);
+    await muatRekapStatusKlaim();
   }
+}
+async function muatRekapStatusKlaim(){
+  const box = document.getElementById('rekapStatusKlaimList');
+  const r = await api('klaim.rekapStatus', {dari: val('rsk_dari'), sampai: val('rsk_sampai')}, 'POST');
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || 'Gagal memuat'}</div>`; return; }
+  const ringkasan = r.ringkasanPerStatus || [];
+  const rows = r.data || [];
+  box.innerHTML = (ringkasan.length ? `<div class="grid cols3" style="margin-bottom:12px">
+      ${ringkasan.map(x=>`<div class="card stat"><b>${x.jumlah}</b><span>${x.status} (Rp${Number(x.totalTarifPrediksi||0).toLocaleString('id-ID')})</span></div>`).join("")}
+    </div>` : "") +
+    (rows.length ? `<table>
+    <tr><th>Kunjungan</th><th>RM</th><th>Pasien</th><th>Kode CBG</th><th>Tarif Prediksi</th><th>No. Pengajuan</th><th>Status</th><th>Tgl Prediksi</th></tr>
+    ${rows.map(x=>`<tr><td>${x.kunjunganId}</td><td>${x.noRm}</td><td>${x.namaPasien}</td><td>${x.kodeCbgPrediksi||'-'}</td>
+      <td>Rp${Number(x.tarifPrediksi||0).toLocaleString('id-ID')}</td><td>${x.nomorPengajuanKlaim||'-'}</td>
+      <td><span class="badge ${x.statusKlaim==='Disetujui'?'ok':(x.statusKlaim==='Ditolak'?'danger':'warn')}">${x.statusKlaim}</span></td>
+      <td>${new Date(x.tglPrediksi).toLocaleDateString('id-ID')}</td></tr>`).join("")}
+  </table>` : `<div class="empty">Tidak ada data klaim pada periode ini.</div>`);
 }
 async function muatRekapKematian(){
   const box = document.getElementById('rekapKematianList');
@@ -2709,18 +2806,27 @@ async function renderPenunjangTab(tab){
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahObatBaru()">Tambah Obat</button>
         </div>
         <div class="card">
-          <label>Tambah Stok Obat yang Sudah Ada</label>
+          <label>Tambah Stok Obat yang Sudah Ada (dengan Batch &amp; Kadaluarsa)</label>
           <select id="obatKodeTambahStok"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
           <input id="obatJumlahTambah" type="number" placeholder="Jumlah tambahan" style="margin-top:6px">
+          <input id="obatNoBatch" placeholder="Nomor Batch (wajib)" style="margin-top:6px">
+          <label style="margin-top:6px">Tanggal Kadaluarsa (wajib)</label><input id="obatTanggalKadaluarsa" type="date">
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahStok()">Tambah Stok</button>
         </div>
       </div>
       <div style="margin-top:10px">${pjTableObat(obatRows)}</div>
+      <div class="section-title" style="margin-top:20px">⏰ Obat Mendekati/Sudah Kadaluarsa</div>
+      <div class="row">
+        <div><label>Ambang Hari (tampilkan yang kadaluarsa dalam N hari)</label><input id="obatAmbangHari" type="number" value="90"></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatObatKadaluarsa()">Tampilkan</button></div>
+      </div>
+      <div id="obatKadaluarsaList" style="margin-top:10px">Memuat...</div>
       ` : ""}
       <div class="section-title" style="margin-top:20px">Daftar Resep</div>
       <div id="pjList"></div>`;
     const resepRows = await api('farmasi.listResep', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
+    if(bolehKelola) await muatObatKadaluarsa();
   } else if (tab === 'gizi') {
     const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
@@ -3164,8 +3270,27 @@ async function submitTambahObatBaru(){
 async function submitTambahStok(){
   const kode = val('obatKodeTambahStok');
   if(!kode){ toast('Pilih obat dulu'); return; }
-  const r = await api('farmasi.tambahStok', {kode, jumlah:Number(val('obatJumlahTambah'))||0}, 'POST');
-  if(r.ok){ toast('Stok ditambahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menambah stok');
+  const noBatch = val('obatNoBatch');
+  const tanggalKadaluarsa = val('obatTanggalKadaluarsa');
+  if(!noBatch){ toast('Nomor batch wajib diisi'); return; }
+  if(!tanggalKadaluarsa){ toast('Tanggal kadaluarsa wajib diisi'); return; }
+  const r = await api('farmasi.tambahStok', {kode, jumlah:Number(val('obatJumlahTambah'))||0, noBatch, tanggalKadaluarsa}, 'POST');
+  if(r.ok){ toast('Stok & batch ditambahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menambah stok');
+}
+async function muatObatKadaluarsa(){
+  const box = document.getElementById('obatKadaluarsaList');
+  if(!box) return;
+  const ambangHari = Number(val('obatAmbangHari')) || 90;
+  const r = await api('farmasi.daftarObatKadaluarsa', {ambangHari}, 'POST');
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || 'Gagal memuat'}</div>`; return; }
+  const rows = r.data || [];
+  if(!rows.length){ box.innerHTML = `<div class="empty">Tidak ada obat yang mendekati/sudah kadaluarsa dalam ${ambangHari} hari.</div>`; return; }
+  box.innerHTML = `<table>
+    <tr><th>Kode</th><th>Nama Obat</th><th>No. Batch</th><th>Sisa</th><th>Tgl Kadaluarsa</th><th>Status</th></tr>
+    ${rows.map(x=>`<tr><td>${x.kodeObat}</td><td>${x.namaObat}</td><td>${x.noBatch}</td><td>${x.jumlahSisa} ${x.satuan||''}</td>
+      <td>${new Date(x.tanggalKadaluarsa).toLocaleDateString('id-ID')}</td>
+      <td><span class="badge ${x.status==='Kadaluarsa'?'danger':'warn'}">${x.status}</span></td></tr>`).join("")}
+  </table>`;
 }
 function renderResepList(rows, bolehKelola){
   if(!rows || !rows.length) return '<div class="empty">Belum ada resep</div>';
@@ -3684,6 +3809,106 @@ async function submitChecklistOperasi(joId, fase){
   const catatan = document.getElementById(`chkCatatan_${joId}_${faseId}`).value.trim();
   const r = await api("operasi.checklistSimpan", {jadwalOperasiId: joId, fase, itemDicek, catatan}, "POST");
   if(r.ok){ toast(`Checklist ${fase} tersimpan`); await muatJadwalOperasi(); } else toast(r.msg || "Gagal menyimpan checklist");
+}
+
+/* ================= JADWAL JAGA / JADWAL DOKTER ================= */
+// Menu ini SENGAJA terbuka untuk SEMUA staf yang login (lihat navAllowed()) —
+// siapa saja perlu bisa melihat siapa yang jaga hari ini/besok. Yang dibatasi
+// hanya kemampuan menambah/mengubah/menghapus (bolehKelola), lewat modul
+// granular "jadwaljaga" atau admin.
+async function pageJadwalJaga(el){
+  const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('jadwaljaga');
+  el.innerHTML = `<h1>📅 Jadwal Jaga</h1><p class="sub">Jadwal jaga/dokter per tanggal &amp; shift — bisa dilihat semua staf yang login</p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="jj_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="jj_sampai" type="date"></div>
+        <div><label>Unit/Poli (opsional)</label><input id="jj_unit" placeholder="cth: IGD"></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatJadwalJaga()">Tampilkan</button></div>
+      </div>
+    </div>
+    ${bolehKelola ? `<div class="card" style="margin-bottom:12px">
+      <div class="section-title" id="jjFormTitle">Tambah Jadwal Jaga</div>
+      <input type="hidden" id="jj_id">
+      <label>Tanggal</label><input id="jj_f_tanggal" type="date">
+      <label>Shift</label><select id="jj_f_shift"><option>Pagi</option><option>Siang</option><option>Malam</option></select>
+      <label>Unit/Poli (opsional)</label><input id="jj_f_unit" placeholder="cth: IGD, Poli Umum, Ruang Melati">
+      <label>Petugas</label>
+      <select id="jj_f_pegawaiId" onchange="onPegawaiSelectChange('jj_f_pegawaiId','jj_f_pegawaiManual')"><option value="">Memuat daftar pegawai...</option></select>
+      <input id="jj_f_pegawaiManual" placeholder="Ketik nama manual" style="display:none;margin-top:6px">
+      <label>Peran (opsional)</label><input id="jj_f_peran" placeholder="cth: Dokter Jaga, Perawat, Bidan">
+      <label>Catatan (opsional)</label><input id="jj_f_catatan">
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn sm" onclick="submitJadwalJaga()">Simpan</button>
+        <button class="btn sm ghost" onclick="batalEditJadwalJaga()">Batal Ubah</button>
+      </div>
+    </div>` : ""}
+    <div id="jjList"></div>`;
+  const now = new Date();
+  document.getElementById("jj_dari").value = now.toISOString().slice(0,10);
+  document.getElementById("jj_sampai").value = new Date(now.getTime()+7*86400000).toISOString().slice(0,10);
+  if(bolehKelola){
+    isiSelectPegawai("jj_f_pegawaiId");
+    document.getElementById("jj_f_tanggal").value = now.toISOString().slice(0,10);
+  }
+  await muatJadwalJaga();
+}
+async function muatJadwalJaga(){
+  const box = document.getElementById('jjList');
+  if(!box) return;
+  const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('jadwaljaga');
+  const rows = await api('jadwalJaga.list', {dari: val('jj_dari'), sampai: val('jj_sampai'), unitPoli: val('jj_unit')||undefined}, 'GET');
+  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Tidak ada jadwal jaga pada periode ini.</div>`; return; }
+  box.innerHTML = `<div class="card"><table>
+    <tr><th>Tanggal</th><th>Shift</th><th>Unit/Poli</th><th>Petugas</th><th>Peran</th><th>Catatan</th><th>Dicatat Oleh</th>${bolehKelola?'<th></th>':''}</tr>
+    ${rows.map(j=>`<tr>
+      <td>${new Date(j.tanggal).toLocaleDateString('id-ID')}</td><td>${j.shift}</td><td>${j.unitPoli||'-'}</td>
+      <td>${j.nama}</td><td>${j.peran||'-'}</td><td>${j.catatan||'-'}</td><td>${j.dicatatOleh||'-'}</td>
+      ${bolehKelola ? `<td>
+        <button class="btn sm ghost" onclick='mulaiEditJadwalJaga(${JSON.stringify(j).replace(/'/g,"&#39;")})'>✏️</button>
+        <button class="btn sm ghost" onclick="hapusJadwalJaga('${j.id}')">🗑️</button>
+      </td>` : ''}
+    </tr>`).join("")}
+  </table></div>`;
+}
+function mulaiEditJadwalJaga(j){
+  document.getElementById("jjFormTitle").textContent = "Ubah Jadwal Jaga";
+  document.getElementById("jj_id").value = j.id;
+  document.getElementById("jj_f_tanggal").value = (j.tanggal||"").slice(0,10);
+  document.getElementById("jj_f_shift").value = j.shift;
+  document.getElementById("jj_f_unit").value = j.unitPoli || "";
+  document.getElementById("jj_f_pegawaiId").value = "__manual__";
+  document.getElementById("jj_f_pegawaiManual").style.display = "block";
+  document.getElementById("jj_f_pegawaiManual").value = j.nama || "";
+  document.getElementById("jj_f_peran").value = j.peran || "";
+  document.getElementById("jj_f_catatan").value = j.catatan || "";
+  window.scrollTo(0,0);
+}
+function batalEditJadwalJaga(){
+  document.getElementById("jjFormTitle").textContent = "Tambah Jadwal Jaga";
+  document.getElementById("jj_id").value = "";
+  document.getElementById("jj_f_pegawaiId").value = "";
+  document.getElementById("jj_f_pegawaiManual").style.display = "none";
+  document.getElementById("jj_f_pegawaiManual").value = "";
+  document.getElementById("jj_f_unit").value = "";
+  document.getElementById("jj_f_peran").value = "";
+  document.getElementById("jj_f_catatan").value = "";
+}
+async function submitJadwalJaga(){
+  const id = val('jj_id');
+  const pegawai = pegawaiPayload('jj_f_pegawaiId','jj_f_pegawaiManual');
+  const payload = {
+    tanggal: val('jj_f_tanggal'), shift: val('jj_f_shift'), unitPoli: val('jj_f_unit'),
+    pegawaiId: pegawai.id, nama: pegawai.nama, peran: val('jj_f_peran'), catatan: val('jj_f_catatan')
+  };
+  const r = id ? await api('jadwalJaga.ubah', {id, ...payload}, 'POST') : await api('jadwalJaga.tambah', payload, 'POST');
+  if(r.ok){ toast(id ? 'Jadwal jaga diperbarui' : 'Jadwal jaga ditambahkan'); batalEditJadwalJaga(); await muatJadwalJaga(); }
+  else toast(r.msg || 'Gagal menyimpan jadwal jaga');
+}
+async function hapusJadwalJaga(id){
+  if(!confirm('Hapus jadwal jaga ini?')) return;
+  const r = await api('jadwalJaga.hapus', {id}, 'POST');
+  if(r.ok){ toast('Jadwal jaga dihapus'); await muatJadwalJaga(); } else toast(r.msg || 'Gagal menghapus jadwal jaga');
 }
 
 render();
