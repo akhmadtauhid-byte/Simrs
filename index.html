@@ -190,6 +190,9 @@ const NAV = [
 {id:"suratketerangan", label:"📄 Surat Keterangan", step:null},
 {id:"kamaroperasi", label:"🔪 Kamar Operasi", step:null},
 {id:"jadwaljaga", label:"📅 Jadwal Jaga", step:null},
+{id:"ppi", label:"🦠 Surveilans Infeksi (PPI)", step:null},
+{id:"alatmedis", label:"🛠️ Kalibrasi Alat Medis", step:null},
+{id:"laporanrl", label:"📊 Laporan RL", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -215,7 +218,8 @@ const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
-  tarif:["tarif"], mutu:["dashboardmutu"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"]
+  tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
+  ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -240,6 +244,9 @@ const DAFTAR_MODUL = [
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
   {id:"ok", label:"Kamar Operasi (jadwal operasi + checklist keselamatan operasi)"},
   {id:"jadwaljaga", label:"Jadwal Jaga / Jadwal Dokter (kelola: tambah/ubah/hapus)"},
+  {id:"ppi", label:"Surveilans Infeksi RS / PPI (catat & lihat rekap infeksi)"},
+  {id:"alatmedis", label:"Kalibrasi & Perawatan Alat Medis (kelola alat + catat kalibrasi)"},
+  {id:"pelaporan", label:"Laporan RL untuk SIRS Online (lihat laporan RL3/RL4/RL5)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -276,6 +283,7 @@ function renderNav(){
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageKelolaPegawai()">👥 Kelola Pegawai</button>` : ""}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageRekapPegawai()">📊 Rekap Pegawai</button>` : ""}
       ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageLogAktivitas()">📜 Log Aktivitas</button>` : ""}
+      ${(!DEMO_MODE && state.user.role==="admin") ? `<button onclick="pageWaPengaturan()">📱 Notifikasi WhatsApp</button>` : ""}
       <button onclick="logout()">Keluar</button>`;
   }
 }
@@ -964,7 +972,8 @@ function render(){
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
-    suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga
+    suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
+    ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -3909,6 +3918,377 @@ async function hapusJadwalJaga(id){
   if(!confirm('Hapus jadwal jaga ini?')) return;
   const r = await api('jadwalJaga.hapus', {id}, 'POST');
   if(r.ok){ toast('Jadwal jaga dihapus'); await muatJadwalJaga(); } else toast(r.msg || 'Gagal menghapus jadwal jaga');
+}
+
+/* ================= SURVEILANS INFEKSI RS (PPI) ================= */
+const DAFTAR_JENIS_INFEKSI = ['Plebitis','ISK (Infeksi Saluran Kemih)','IDO (Infeksi Daerah Operasi)','Dekubitus','VAP (Ventilator Associated Pneumonia)','Lainnya'];
+async function pagePpi(el){
+  const bolehCatat = state.user.role === 'admin' || (state.user.modul||[]).includes('ppi') || (state.user.modul||[]).includes('mutu');
+  el.innerHTML = `<h1>🦠 Surveilans Infeksi RS (PPI)</h1><p class="sub">Pencatatan infeksi terkait pelayanan kesehatan (HAIs) — Plebitis, ISK, IDO, Dekubitus, VAP, dll.</p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="ppi_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="ppi_sampai" type="date"></div>
+        <div><label>Jenis Infeksi (opsional)</label><select id="ppi_jenis"><option value="">Semua</option>${DAFTAR_JENIS_INFEKSI.map(j=>`<option>${j}</option>`).join("")}</select></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatPpi()">Tampilkan</button></div>
+      </div>
+    </div>
+    <div id="ppiRekap" class="card" style="margin-bottom:12px"></div>
+    ${bolehCatat ? `<div class="card" style="margin-bottom:12px">
+      <div class="section-title" id="ppiFormTitle">Catat Infeksi Baru</div>
+      <input type="hidden" id="ppi_id">
+      <label>No. Kunjungan (cth: KJ00001)</label><input id="ppi_f_kunjunganId" placeholder="Nomor kunjungan pasien">
+      <label>Jenis Infeksi</label><select id="ppi_f_jenis">${DAFTAR_JENIS_INFEKSI.map(j=>`<option>${j}</option>`).join("")}</select>
+      <label>Tanggal Ditemukan</label><input id="ppi_f_tanggal" type="date">
+      <label>Lokasi Infeksi</label><input id="ppi_f_lokasi" placeholder="cth: IV line tangan kanan">
+      <label>Faktor Risiko</label><input id="ppi_f_risiko" placeholder="cth: Pemasangan infus lama">
+      <label>Tindak Lanjut</label><input id="ppi_f_tindakan" placeholder="cth: Ganti lokasi infus, edukasi">
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn sm" onclick="submitPpi()">Simpan</button>
+        <button class="btn sm ghost" onclick="batalEditPpi()">Batal Ubah</button>
+      </div>
+    </div>` : ""}
+    <div id="ppiList"></div>`;
+  const now = new Date();
+  document.getElementById("ppi_dari").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  document.getElementById("ppi_sampai").value = now.toISOString().slice(0,10);
+  if(bolehCatat) document.getElementById("ppi_f_tanggal").value = now.toISOString().slice(0,10);
+  await muatPpi();
+}
+async function muatPpi(){
+  const box = document.getElementById('ppiList');
+  const rekapBox = document.getElementById('ppiRekap');
+  if(!box) return;
+  const bolehCatat = state.user.role === 'admin' || (state.user.modul||[]).includes('ppi') || (state.user.modul||[]).includes('mutu');
+  const dari = val('ppi_dari'), sampai = val('ppi_sampai'), jenis = val('ppi_jenis');
+  const rekap = await api('ppi.rekap', {dari, sampai}, 'GET');
+  if(rekap && rekap.ok){
+    rekapBox.innerHTML = `<div class="section-title">Rekap Periode ${new Date(rekap.dari).toLocaleDateString('id-ID')} — ${new Date(rekap.sampai).toLocaleDateString('id-ID')}</div>
+      <div class="row">
+        <div><b>${rekap.totalInfeksi}</b><div class="hint">Total kasus infeksi</div></div>
+        <div><b>${rekap.hariRawatPeriode}</b><div class="hint">Hari rawat (patient-days)</div></div>
+        <div><b>${rekap.insidensPer1000HariRawat ?? '-'}</b><div class="hint">Insidens per 1000 hari rawat</div></div>
+      </div>
+      ${rekap.perJenis && rekap.perJenis.length ? `<table style="margin-top:8px"><tr><th>Jenis Infeksi</th><th>Jumlah</th></tr>
+        ${rekap.perJenis.map(j=>`<tr><td>${j.jenisInfeksi}</td><td>${j.jumlah}</td></tr>`).join("")}</table>` : '<div class="hint">Belum ada kasus pada periode ini.</div>'}`;
+  } else { rekapBox.innerHTML = `<div class="empty">${(rekap&&rekap.msg)||'Gagal memuat rekap'}</div>`; }
+
+  const rows = await api('ppi.list', {dari, sampai, jenisInfeksi: jenis||undefined}, 'GET');
+  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Tidak ada catatan infeksi pada periode ini.</div>`; return; }
+  box.innerHTML = `<div class="card"><table>
+    <tr><th>Tanggal</th><th>No. RM</th><th>Pasien</th><th>Jenis Infeksi</th><th>Hari Rawat Ke</th><th>Lokasi</th><th>Faktor Risiko</th><th>Tindak Lanjut</th><th>Dilaporkan Oleh</th>${bolehCatat?'<th></th>':''}</tr>
+    ${rows.map(r=>`<tr>
+      <td>${new Date(r.tanggalDitemukan).toLocaleDateString('id-ID')}</td><td>${r.noRm}</td><td>${r.namaPasien}</td>
+      <td><span class="badge warn">${r.jenisInfeksi}</span></td><td>${r.hariRawatKe ?? '-'}</td>
+      <td>${r.lokasiInfeksi||'-'}</td><td>${r.faktorRisiko||'-'}</td><td>${r.tindakanLanjut||'-'}</td><td>${r.dilaporkanOleh||'-'}</td>
+      ${bolehCatat ? `<td><button class="btn sm ghost" onclick='mulaiEditPpi(${JSON.stringify(r).replace(/'/g,"&#39;")})'>✏️</button></td>` : ''}
+    </tr>`).join("")}
+  </table></div>`;
+}
+function mulaiEditPpi(r){
+  document.getElementById("ppiFormTitle").textContent = "Ubah Catatan Infeksi";
+  document.getElementById("ppi_id").value = r.id;
+  document.getElementById("ppi_f_kunjunganId").value = "";
+  document.getElementById("ppi_f_kunjunganId").disabled = true;
+  document.getElementById("ppi_f_jenis").value = r.jenisInfeksi;
+  document.getElementById("ppi_f_jenis").disabled = true;
+  document.getElementById("ppi_f_tanggal").disabled = true;
+  document.getElementById("ppi_f_lokasi").value = r.lokasiInfeksi || "";
+  document.getElementById("ppi_f_risiko").value = r.faktorRisiko || "";
+  document.getElementById("ppi_f_tindakan").value = r.tindakanLanjut || "";
+  window.scrollTo(0,0);
+}
+function batalEditPpi(){
+  document.getElementById("ppiFormTitle").textContent = "Catat Infeksi Baru";
+  document.getElementById("ppi_id").value = "";
+  document.getElementById("ppi_f_kunjunganId").value = "";
+  document.getElementById("ppi_f_kunjunganId").disabled = false;
+  document.getElementById("ppi_f_jenis").disabled = false;
+  document.getElementById("ppi_f_tanggal").disabled = false;
+  document.getElementById("ppi_f_lokasi").value = "";
+  document.getElementById("ppi_f_risiko").value = "";
+  document.getElementById("ppi_f_tindakan").value = "";
+}
+async function submitPpi(){
+  const id = val('ppi_id');
+  if(id){
+    const r = await api('ppi.update', {id, lokasiInfeksi: val('ppi_f_lokasi'), faktorRisiko: val('ppi_f_risiko'), tindakanLanjut: val('ppi_f_tindakan')}, 'POST');
+    if(r.ok){ toast('Catatan diperbarui'); batalEditPpi(); await muatPpi(); } else toast(r.msg || 'Gagal memperbarui catatan');
+    return;
+  }
+  if(!val('ppi_f_kunjunganId')){ toast('No. Kunjungan wajib diisi'); return; }
+  const r = await api('ppi.catat', {
+    kunjunganId: val('ppi_f_kunjunganId'), jenisInfeksi: val('ppi_f_jenis'), tanggalDitemukan: val('ppi_f_tanggal'),
+    lokasiInfeksi: val('ppi_f_lokasi'), faktorRisiko: val('ppi_f_risiko'), tindakanLanjut: val('ppi_f_tindakan')
+  }, 'POST');
+  if(r.ok){ toast('Catatan infeksi disimpan'); batalEditPpi(); await muatPpi(); } else toast(r.msg || 'Gagal menyimpan catatan');
+}
+
+/* ================= KALIBRASI & PERAWATAN ALAT MEDIS ================= */
+async function pageAlatMedis(el){
+  const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('alatmedis');
+  el.innerHTML = `<h1>🛠️ Kalibrasi &amp; Perawatan Alat Medis</h1><p class="sub">Daftar alat medis, status, dan riwayat kalibrasi berkala</p>
+    ${bolehKelola ? `<div class="card" style="margin-bottom:12px">
+      <div class="section-title">Tambah Alat Medis Baru</div>
+      <label>Kode Alat (unik)</label><input id="am_f_kode" placeholder="cth: ALT-001">
+      <label>Nama Alat</label><input id="am_f_nama" placeholder="cth: Tensimeter Digital">
+      <label>Lokasi</label><input id="am_f_lokasi" placeholder="cth: Poli Umum">
+      <label>Interval Kalibrasi (bulan)</label><input id="am_f_interval" type="number" value="12" min="1">
+      <label>Keterangan (opsional)</label><input id="am_f_ket">
+      <button class="btn sm" style="margin-top:8px" onclick="submitTambahAlatMedis()">Tambah Alat</button>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">Catat Hasil Kalibrasi</div>
+      <label>Pilih Alat</label><select id="am_k_alatId"><option value="">Memuat daftar alat...</option></select>
+      <label>Tanggal Kalibrasi</label><input id="am_k_tanggal" type="date">
+      <label>Hasil</label><select id="am_k_hasil"><option>Layak Pakai</option><option>Tidak Layak Pakai</option></select>
+      <label>Dilakukan Oleh (vendor/teknisi)</label><input id="am_k_oleh" placeholder="cth: Vendor ABC">
+      <label>No. Sertifikat (opsional)</label><input id="am_k_sertifikat">
+      <label>Catatan (opsional)</label><input id="am_k_catatan">
+      <button class="btn sm" style="margin-top:8px" onclick="submitKalibrasiAlatMedis()">Simpan Hasil Kalibrasi</button>
+    </div>` : ""}
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Filter Status</label><select id="am_filter_status" onchange="muatAlatMedis()"><option value="">Semua</option><option>Baik</option><option>Rusak</option><option>Dalam Perbaikan</option><option>Tidak Dipakai</option></select></div>
+      </div>
+    </div>
+    <div id="alatMedisList"></div>
+    <div id="riwayatKalibrasiBox" style="margin-top:16px"></div>`;
+  if(bolehKelola) document.getElementById("am_k_tanggal").value = new Date().toISOString().slice(0,10);
+  await muatAlatMedis();
+}
+function badgeStatusKalibrasi(s){
+  if(s === 'Aman') return `<span class="badge ok">Aman</span>`;
+  if(s === 'Akan Jatuh Tempo') return `<span class="badge warn">Akan Jatuh Tempo</span>`;
+  if(s === 'Jatuh Tempo') return `<span class="badge danger">Jatuh Tempo</span>`;
+  return `<span class="badge muted">Belum Pernah Kalibrasi</span>`;
+}
+async function muatAlatMedis(){
+  const box = document.getElementById('alatMedisList');
+  if(!box) return;
+  const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('alatmedis');
+  const rows = await api('alatMedis.list', {status: val('am_filter_status')||undefined}, 'GET');
+  window.__alatMedisCache = rows || [];
+  if(bolehKelola){
+    const sel = document.getElementById('am_k_alatId');
+    if(sel) sel.innerHTML = (rows||[]).map(a=>`<option value="${a.id}">${a.kodeAlat} — ${a.namaAlat}</option>`).join("") || `<option value="">Belum ada alat</option>`;
+  }
+  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Belum ada alat medis terdaftar.</div>`; return; }
+  box.innerHTML = `<div class="card"><table>
+    <tr><th>Kode</th><th>Nama Alat</th><th>Lokasi</th><th>Status</th><th>Kalibrasi Terakhir</th><th>Kalibrasi Berikutnya</th><th>Status Kalibrasi</th><th></th></tr>
+    ${rows.map(a=>`<tr>
+      <td>${a.kodeAlat}</td><td>${a.namaAlat}</td><td>${a.lokasi||'-'}</td>
+      <td><span class="badge ${a.status==='Baik'?'ok':(a.status==='Rusak'?'danger':'warn')}">${a.status}</span></td>
+      <td>${a.tanggalKalibrasiTerakhir ? new Date(a.tanggalKalibrasiTerakhir).toLocaleDateString('id-ID') : '-'}</td>
+      <td>${a.tanggalKalibrasiBerikutnya ? new Date(a.tanggalKalibrasiBerikutnya).toLocaleDateString('id-ID') : '-'}</td>
+      <td>${badgeStatusKalibrasi(a.statusKalibrasi)}</td>
+      <td><button class="btn sm ghost" onclick="lihatRiwayatKalibrasi('${a.id}','${(a.namaAlat||'').replace(/'/g,"&#39;")}')">📜 Riwayat</button></td>
+    </tr>`).join("")}
+  </table></div>`;
+}
+async function submitTambahAlatMedis(){
+  if(!val('am_f_kode') || !val('am_f_nama')){ toast('Kode & Nama Alat wajib diisi'); return; }
+  const r = await api('alatMedis.tambah', {
+    kodeAlat: val('am_f_kode'), namaAlat: val('am_f_nama'), lokasi: val('am_f_lokasi'),
+    intervalKalibrasiBulan: val('am_f_interval'), keterangan: val('am_f_ket')
+  }, 'POST');
+  if(r.ok){
+    toast('Alat medis ditambahkan');
+    ['am_f_kode','am_f_nama','am_f_lokasi','am_f_ket'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('am_f_interval').value = 12;
+    await muatAlatMedis();
+  } else toast(r.msg || 'Gagal menambah alat medis');
+}
+async function submitKalibrasiAlatMedis(){
+  const alatId = val('am_k_alatId');
+  if(!alatId){ toast('Pilih alat terlebih dahulu'); return; }
+  const r = await api('alatMedis.catatKalibrasi', {
+    alatId, tanggalKalibrasi: val('am_k_tanggal'), hasil: val('am_k_hasil'),
+    dilakukanOleh: val('am_k_oleh'), sertifikatNo: val('am_k_sertifikat'), catatan: val('am_k_catatan')
+  }, 'POST');
+  if(r.ok){
+    toast('Hasil kalibrasi disimpan');
+    ['am_k_oleh','am_k_sertifikat','am_k_catatan'].forEach(id=>document.getElementById(id).value='');
+    await muatAlatMedis();
+  } else toast(r.msg || 'Gagal menyimpan hasil kalibrasi');
+}
+async function lihatRiwayatKalibrasi(alatId, namaAlat){
+  const box = document.getElementById('riwayatKalibrasiBox');
+  box.innerHTML = `<div class="card"><div class="section-title">Riwayat Kalibrasi — ${namaAlat}</div><div class="empty">Memuat...</div></div>`;
+  const rows = await api('alatMedis.riwayatKalibrasi', {alatId}, 'GET');
+  if(!rows || !rows.length){ box.innerHTML = `<div class="card"><div class="section-title">Riwayat Kalibrasi — ${namaAlat}</div><div class="empty">Belum ada riwayat kalibrasi.</div></div>`; return; }
+  box.innerHTML = `<div class="card"><div class="section-title">Riwayat Kalibrasi — ${namaAlat}</div><table>
+    <tr><th>Tanggal</th><th>Hasil</th><th>Dilakukan Oleh</th><th>No. Sertifikat</th><th>Catatan</th><th>Dicatat Oleh</th></tr>
+    ${rows.map(k=>`<tr>
+      <td>${new Date(k.tanggalKalibrasi).toLocaleDateString('id-ID')}</td>
+      <td><span class="badge ${k.hasil==='Layak Pakai'?'ok':'danger'}">${k.hasil}</span></td>
+      <td>${k.dilakukanOleh||'-'}</td><td>${k.sertifikatNo||'-'}</td><td>${k.catatan||'-'}</td><td>${k.dicatatOleh||'-'}</td>
+    </tr>`).join("")}
+  </table></div>`;
+}
+
+/* ================= LAPORAN RL (SIRS ONLINE) ================= */
+async function pageLaporanRl(el){
+  el.innerHTML = `<h1>📊 Laporan RL (SIRS Online)</h1>
+    <p class="sub">RL1 (profil dasar RS), RL3 (indikator rawat inap), RL4 (10 besar diagnosa per golongan umur), RL5 (rekap kunjungan). <b>Bukan pengiriman otomatis</b> — staf tetap menyalin angkanya secara manual ke portal SIRS Online resmi Kemenkes.</p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">RL1 — Profil Dasar Rumah Sakit</div>
+      <div id="rlProfilBox">Memuat...</div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="rl_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="rl_sampai" type="date"></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatLaporanRl()">Tampilkan RL3/RL4/RL5</button></div>
+      </div>
+    </div>
+    <div id="rl3Box" class="card" style="margin-bottom:12px"></div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">RL4 — 10 Besar Diagnosa Utama</div>
+      <select id="rl4_jenis" onchange="muatRl4()"><option>Rawat Inap</option><option>Rawat Jalan</option><option>IGD</option></select>
+      <div id="rl4Box" style="margin-top:8px"></div>
+    </div>
+    <div id="rl5Box" class="card"></div>`;
+  const now = new Date();
+  document.getElementById("rl_dari").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  document.getElementById("rl_sampai").value = now.toISOString().slice(0,10);
+  await muatRlProfil();
+  await muatLaporanRl();
+}
+async function muatRlProfil(){
+  const box = document.getElementById('rlProfilBox');
+  const bolehUbah = state.user.role === 'admin';
+  const r = await api('rl.profilGet', {}, 'GET');
+  const p = r || {};
+  box.innerHTML = `
+    <div class="row">
+      <div><label>Nama RS</label><input id="rlp_namaRs" value="${p.namaRs||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Kode RS</label><input id="rlp_kodeRs" value="${p.kodeRs||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Kelas RS</label><input id="rlp_kelasRs" value="${p.kelasRs||''}" ${bolehUbah?'':'disabled'}></div>
+    </div>
+    <div class="row">
+      <div><label>Jenis RS</label><input id="rlp_jenisRs" value="${p.jenisRs||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Kepemilikan</label><input id="rlp_kepemilikan" value="${p.kepemilikan||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Jumlah TT Total</label><input id="rlp_jumlahTt" type="number" value="${p.jumlahTtTotal||''}" ${bolehUbah?'':'disabled'}></div>
+    </div>
+    <label>Alamat</label><input id="rlp_alamat" value="${p.alamat||''}" ${bolehUbah?'':'disabled'}>
+    <div class="row">
+      <div><label>Kabupaten/Kota</label><input id="rlp_kabkota" value="${p.kabupatenKota||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Provinsi</label><input id="rlp_provinsi" value="${p.provinsi||''}" ${bolehUbah?'':'disabled'}></div>
+    </div>
+    <div class="row">
+      <div><label>No. Izin Operasional</label><input id="rlp_noizin" value="${p.noIzinOperasional||''}" ${bolehUbah?'':'disabled'}></div>
+      <div><label>Direktur</label><input id="rlp_direktur" value="${p.direktur||''}" ${bolehUbah?'':'disabled'}></div>
+    </div>
+    ${bolehUbah ? `<button class="btn sm" style="margin-top:8px" onclick="simpanRlProfil()">Simpan Profil</button>` : `<p class="hint">Hanya admin yang bisa mengubah profil dasar RS.</p>`}`;
+}
+async function simpanRlProfil(){
+  const r = await api('rl.profilSimpan', {
+    namaRs: val('rlp_namaRs'), kodeRs: val('rlp_kodeRs'), kelasRs: val('rlp_kelasRs'), jenisRs: val('rlp_jenisRs'),
+    kepemilikan: val('rlp_kepemilikan'), jumlahTtTotal: val('rlp_jumlahTt'), alamat: val('rlp_alamat'),
+    kabupatenKota: val('rlp_kabkota'), provinsi: val('rlp_provinsi'), noIzinOperasional: val('rlp_noizin'), direktur: val('rlp_direktur')
+  }, 'POST');
+  if(r.ok){ toast('Profil RS disimpan'); await muatRlProfil(); } else toast(r.msg || 'Gagal menyimpan profil RS');
+}
+async function muatLaporanRl(){
+  await Promise.all([muatRl3(), muatRl4(), muatRl5()]);
+}
+async function muatRl3(){
+  const box = document.getElementById('rl3Box'); if(!box) return;
+  const r = await api('rl.laporanRawatInap', {dari: val('rl_dari'), sampai: val('rl_sampai')}, 'GET');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat RL3'}</div>`; return; }
+  box.innerHTML = `<div class="section-title">RL3 — Indikator Pelayanan Rawat Inap</div>
+    <div class="row">
+      <div><b>${r.bor ?? '-'}%</b><div class="hint">BOR</div></div>
+      <div><b>${r.avlos ?? '-'}</b><div class="hint">AvLOS (hari)</div></div>
+      <div><b>${r.toi ?? '-'}</b><div class="hint">TOI (hari)</div></div>
+      <div><b>${r.bto ?? '-'}</b><div class="hint">BTO (kali)</div></div>
+      <div><b>${r.ndr ?? '-'}</b><div class="hint">NDR (‰)</div></div>
+      <div><b>${r.gdr ?? '-'}</b><div class="hint">GDR (‰)</div></div>
+    </div>
+    <p class="hint">Tempat tidur tersedia: ${r.tempatTidurTersedia} · Pasien masuk: ${r.pasienMasuk} · Pasien keluar total: ${r.pasienKeluarTotal} (hidup: ${r.pasienKeluarHidup}, meninggal &lt;48j: ${r.pasienMatiKurang48Jam}, meninggal ≥48j: ${r.pasienMatiLebih48Jam}) · Hari perawatan: ${r.hariPerawatan}</p>`;
+}
+async function muatRl4(){
+  const box = document.getElementById('rl4Box'); if(!box) return;
+  const r = await api('rl.laporanMorbiditas', {dari: val('rl_dari'), sampai: val('rl_sampai'), jenisKunjungan: val('rl4_jenis')}, 'GET');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat RL4'}</div>`; return; }
+  if(!r.data || !r.data.length){ box.innerHTML = `<div class="empty">Tidak ada data diagnosa pada periode ini.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Kode ICD-10</th><th>Diagnosa</th><th>Total</th><th>Rincian Golongan Umur × Jenis Kelamin</th></tr>
+    ${r.data.map(d=>`<tr>
+      <td>${d.kodeICD10}</td><td>${d.deskripsi}</td><td><b>${d.total}</b></td>
+      <td>${d.rincian.map(x=>`${x.golonganUmur}: L${x.lakiLaki}/P${x.perempuan}`).join(', ')}</td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function muatRl5(){
+  const box = document.getElementById('rl5Box'); if(!box) return;
+  const r = await api('rl.laporanKunjungan', {dari: val('rl_dari'), sampai: val('rl_sampai')}, 'GET');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat RL5'}</div>`; return; }
+  box.innerHTML = `<div class="section-title">RL5 — Rekap Kunjungan</div>
+    <div class="row">
+      <div><b>Per Jenis Kunjungan</b><br>${(r.totalPerJenisKunjungan||[]).map(x=>`${x.jenisKunjungan}: ${x.jumlah}`).join('<br>') || '-'}</div>
+      <div><b>Per Cara Bayar</b><br>${(r.totalPerCaraBayar||[]).map(x=>`${x.caraBayar}: ${x.jumlah}`).join('<br>') || '-'}</div>
+      <div><b>Rawat Jalan Baru/Lama</b><br>Baru: ${r.rawatJalanBaruLama?.pasienBaru ?? 0}<br>Lama: ${r.rawatJalanBaruLama?.pasienLama ?? 0}</div>
+    </div>`;
+}
+
+/* ================= PENGATURAN & LOG NOTIFIKASI WHATSAPP (admin) ================= */
+async function pageWaPengaturan(){
+  const m = document.getElementById("main");
+  m.innerHTML = `<h1>📱 Notifikasi WhatsApp</h1>
+    <p class="sub">Kirim notifikasi WA otomatis ke pasien saat nomor antrian dipanggil atau hasil lab siap. Pengiriman sungguhan dilakukan Supabase Edge Function terpisah (lihat panduan) — halaman ini hanya mengatur & memantau antrean pesan.</p>
+    <button class="btn ghost" style="margin-bottom:14px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
+    <div class="card" style="margin-bottom:12px" id="waPengaturanBox">Memuat...</div>
+    <div class="card">
+      <div class="section-title">Log Pengiriman WhatsApp</div>
+      <select id="wa_filter_status" onchange="muatWaLog()"><option value="">Semua Status</option><option>Menunggu</option><option>Terkirim</option><option>Gagal</option></select>
+      <div id="waLogBox" style="margin-top:8px"></div>
+    </div>`;
+  await muatWaPengaturan();
+  await muatWaLog();
+}
+async function muatWaPengaturan(){
+  const box = document.getElementById('waPengaturanBox'); if(!box) return;
+  const r = await api('wa.pengaturanGet', {}, 'GET');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat pengaturan'}</div>`; return; }
+  const p = r.data;
+  box.innerHTML = `<div class="section-title">Pengaturan</div>
+    <label><input type="checkbox" id="wa_aktif" ${p.aktif?'checked':''} style="width:auto"> Aktifkan pengiriman notifikasi WhatsApp</label>
+    <label>Provider</label><select id="wa_provider"><option value="fonnte" ${p.provider==='fonnte'?'selected':''}>Fonnte</option><option value="wablas" ${p.provider==='wablas'?'selected':''}>Wablas</option></select>
+    <label>API URL</label><input id="wa_apiUrl" value="${p.apiUrl||''}" placeholder="cth: https://api.fonnte.com/send">
+    <label>API Token</label><input id="wa_apiToken" value="${p.apiToken||''}" placeholder="Token dari provider WA Anda">
+    <p class="hint">⚠️ Token disimpan sebagai teks biasa (bukan terenkripsi) — hanya bisa dibaca/diubah admin.</p>
+    <label>Template Pesan — Antrian Dipanggil</label><input id="wa_tplAntrian" value="${(p.templateAntrianDipanggil||'').replace(/"/g,'&quot;')}">
+    <p class="hint">Placeholder tersedia: {noAntrian}, {poliRuangan}</p>
+    <label>Template Pesan — Hasil Lab Siap</label><input id="wa_tplLab" value="${(p.templateHasilLabSiap||'').replace(/"/g,'&quot;')}">
+    <p class="hint">Placeholder tersedia: {noRm}</p>
+    <button class="btn sm" style="margin-top:8px" onclick="simpanWaPengaturan()">Simpan Pengaturan</button>`;
+}
+async function simpanWaPengaturan(){
+  const r = await api('wa.pengaturanSimpan', {
+    aktif: document.getElementById('wa_aktif').checked, provider: val('wa_provider'),
+    apiUrl: val('wa_apiUrl'), apiToken: val('wa_apiToken'),
+    templateAntrianDipanggil: val('wa_tplAntrian'), templateHasilLabSiap: val('wa_tplLab')
+  }, 'POST');
+  if(r.ok){ toast('Pengaturan WhatsApp disimpan'); await muatWaPengaturan(); } else toast(r.msg || 'Gagal menyimpan pengaturan');
+}
+async function muatWaLog(){
+  const box = document.getElementById('waLogBox'); if(!box) return;
+  const rows = await api('wa.log', {status: val('wa_filter_status')||undefined}, 'GET');
+  if(!rows || !rows.length){ box.innerHTML = `<div class="empty">Belum ada pesan WhatsApp diantre.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Waktu</th><th>Kunjungan</th><th>No. HP</th><th>Jenis</th><th>Pesan</th><th>Status</th><th>Error</th><th></th></tr>
+    ${rows.map(w=>`<tr>
+      <td>${new Date(w.dibuatPada).toLocaleString('id-ID')}</td><td>${w.kunjunganId||'-'}</td><td>${w.noHp}</td><td>${w.jenis}</td>
+      <td>${w.pesan}</td>
+      <td><span class="badge ${w.status==='Terkirim'?'ok':(w.status==='Gagal'?'danger':'warn')}">${w.status}</span></td>
+      <td>${w.errorPesan||'-'}</td>
+      <td>${w.status==='Gagal' ? `<button class="btn sm ghost" onclick="kirimUlangWa('${w.id}')">🔁 Kirim Ulang</button>` : ''}</td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function kirimUlangWa(id){
+  const r = await api('wa.kirimUlang', {id}, 'POST');
+  if(r.ok){ toast('Pesan diantre ulang untuk dikirim'); await muatWaLog(); } else toast(r.msg || 'Gagal mengirim ulang');
 }
 
 render();
