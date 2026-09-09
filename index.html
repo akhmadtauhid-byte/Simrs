@@ -539,10 +539,18 @@ async function muatKelolaPegawai(){
       <td style="white-space:nowrap">
         <button class="btn sm ghost" onclick="simpanPegawai('${p.id}')">Simpan</button>
         <button class="btn sm ${p.aktif?'danger':''}" onclick="setAktifPegawai('${p.id}', ${!p.aktif})">${p.aktif?'Nonaktifkan':'Aktifkan'}</button>
+        <button class="btn sm danger" onclick="hapusPegawai('${p.id}', '${(p.nama||'').replace(/'/g,"\\'")}')">Hapus</button>
       </td>
     </tr>`).join("")}
     </table>
-    <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem. Status STR/SIP: "Akan Habis" = kurang dari 60 hari lagi, "Kadaluarsa" = sudah lewat tanggal berlaku.</p>`;
+    <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem. Tombol "Hapus" hanya berhasil kalau pegawai ini BELUM PERNAH tertaut ke tindakan/kunjungan/jadwal apa pun — kalau sudah pernah, sistem akan menolak & menyarankan "Nonaktifkan" saja. Status STR/SIP: "Akan Habis" = kurang dari 60 hari lagi, "Kadaluarsa" = sudah lewat tanggal berlaku.</p>`;
+}
+async function hapusPegawai(id, nama){
+  if(!confirm(`Hapus permanen data pegawai "${nama}"?\n\nHanya berhasil kalau pegawai ini belum pernah dipakai di tindakan/kunjungan/jadwal apa pun.`)) return;
+  const r = await api("kelolaPegawai.hapus", {id}, "POST");
+  state.pegawaiCache = null;
+  toast(r.ok ? "Pegawai dihapus" : (r.msg || "Gagal menghapus"));
+  if(r.ok) await muatKelolaPegawai();
 }
 async function tambahPegawaiBaru(){
   const nama = val("pegNamaBaru");
@@ -1350,7 +1358,54 @@ function renderRiwayatPasienCard(r, opt){
       </tr>`).join("")}
     </table>` : `<div class="hint" style="margin-top:6px">Belum ada riwayat kunjungan sebelumnya.</div>`}
     ${opt.ringkas && r.totalKunjungan > maxItem ? `<div class="hint" style="margin-top:6px">Menampilkan ${maxItem} kunjungan terbaru dari total ${r.totalKunjungan}.</div>` : ""}
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sm ghost" onclick='toggleEditPasien(${JSON.stringify(r.pasien)})'>✏️ Edit Data Pasien</button>
+      <button class="btn sm danger" onclick="hapusPasienData('${r.pasien.id}','${(r.pasien.nama||'').replace(/'/g,"\\'")}')">🗑️ Hapus Pasien</button>
+    </div>
+    <div id="editPasienBox_${r.pasien.id}" style="display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+      <div class="row"><div><label>Nama Lengkap</label><input id="epNama_${r.pasien.id}" value="${(r.pasien.nama||'').replace(/"/g,'&quot;')}"></div>
+        <div><label>Tanggal Lahir</label><input type="date" id="epTglLahir_${r.pasien.id}" value="${(r.pasien.tanggalLahir||'').slice(0,10)}"></div></div>
+      <div class="row"><div><label>Jenis Kelamin</label><select id="epJk_${r.pasien.id}"><option ${r.pasien.jenisKelamin==='Laki-laki'?'selected':''}>Laki-laki</option><option ${r.pasien.jenisKelamin==='Perempuan'?'selected':''}>Perempuan</option></select></div>
+        <div><label>No. HP</label><input id="epNoHp_${r.pasien.id}" value="${(r.pasien.noHp||'').replace(/"/g,'&quot;')}"></div></div>
+      <label>Alamat</label><textarea id="epAlamat_${r.pasien.id}">${(r.pasien.alamat||'').replace(/</g,'&lt;')}</textarea>
+      <div class="row"><div><label>Nama Ibu Kandung</label><input id="epNamaIbu_${r.pasien.id}" value="${(r.pasien.namaIbuKandung||'').replace(/"/g,'&quot;')}"></div>
+        <div><label>Penjamin</label><select id="epPenjamin_${r.pasien.id}"><option ${r.pasien.penjamin==='Umum'?'selected':''}>Umum</option><option ${r.pasien.penjamin==='BPJS'?'selected':''}>BPJS</option><option ${r.pasien.penjamin==='Asuransi Lain'?'selected':''}>Asuransi Lain</option></select></div></div>
+      <div class="row"><div><label>No. Kartu BPJS</label><input id="epNoBpjs_${r.pasien.id}" value="${(r.pasien.noKartuBpjs||'').replace(/"/g,'&quot;')}"></div>
+        <div><label>Golongan Darah</label><select id="epGolDarah_${r.pasien.id}"><option value="" ${!r.pasien.golonganDarah?'selected':''}></option><option ${r.pasien.golonganDarah==='A'?'selected':''}>A</option><option ${r.pasien.golonganDarah==='B'?'selected':''}>B</option><option ${r.pasien.golonganDarah==='AB'?'selected':''}>AB</option><option ${r.pasien.golonganDarah==='O'?'selected':''}>O</option></select></div></div>
+      <label>Alergi</label><input id="epAlergi_${r.pasien.id}" value="${(r.pasien.alergi||'').replace(/"/g,'&quot;')}">
+      <div class="row"><div><label>Kontak Darurat - Nama</label><input id="epKdNama_${r.pasien.id}" value="${(r.pasien.kontakDaruratNama||'').replace(/"/g,'&quot;')}"></div>
+        <div><label>Kontak Darurat - No. HP</label><input id="epKdHp_${r.pasien.id}" value="${(r.pasien.kontakDaruratHp||'').replace(/"/g,'&quot;')}"></div></div>
+      <p class="hint">No. RM &amp; NIK tidak bisa diubah lewat form ini (identitas rekam medis permanen).</p>
+      <button class="btn sm" style="margin-top:6px" onclick="submitEditPasien('${r.pasien.id}')">Simpan Perubahan</button>
+    </div>
   </div>`;
+}
+function toggleEditPasien(pasien){
+  const box = document.getElementById('editPasienBox_'+pasien.id);
+  if(box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+async function submitEditPasien(id){
+  const g = k => { const el = document.getElementById(k+'_'+id); return el ? el.value.trim() : ''; };
+  const nama = g('epNama');
+  if(!nama){ toast('Nama pasien wajib diisi'); return; }
+  const r = await api('pasien.edit', {
+    id, nama, tanggalLahir: g('epTglLahir'), jenisKelamin: g('epJk'), alamat: g('epAlamat'),
+    noHp: g('epNoHp'), namaIbuKandung: g('epNamaIbu'), penjamin: g('epPenjamin'),
+    noKartuBpjs: g('epNoBpjs'), golonganDarah: g('epGolDarah'), alergi: g('epAlergi'),
+    kontakDaruratNama: g('epKdNama'), kontakDaruratHp: g('epKdHp')
+  }, 'POST');
+  if(r.ok){
+    toast('Data pasien disimpan');
+    const rm = val('cariRM');
+    if(rm) await lihatRiwayatSingkat(rm);
+    if(state.activeKunjunganId) await muatRiwayatPasienRM((window.__detail && window.__detail.pasien && (window.__detail.pasien.RM||window.__detail.pasien.rm)) || rm);
+  } else toast(r.msg || 'Gagal menyimpan');
+}
+async function hapusPasienData(id, nama){
+  if(!confirm(`Hapus permanen data pasien "${nama}"?\n\nHanya berhasil kalau pasien ini belum pernah punya kunjungan tercatat (baru daftar, salah input). Kalau sudah pernah berkunjung, hubungi admin.`)) return;
+  const r = await api('pasien.hapus', {id}, 'POST');
+  toast(r.ok ? 'Data pasien dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok){ document.getElementById('areaRiwayatPasien').innerHTML = ''; document.getElementById('cariRM').value=''; }
 }
 
 async function submitKunjungan(){
@@ -1475,9 +1530,11 @@ function debounceMuatKunjungan(){
 }
 async function muatKunjunganAktif(){
   const rows = await api("getKunjunganAktif", {q: val("kjQ"), jenisKunjungan: val("kjJenis")}, "GET");
+  window.__kunjunganAktifRows = rows;
   const list = document.getElementById("list");
   if(!rows.length){ list.innerHTML = `<div class="card empty">Tidak ada kunjungan aktif yang cocok. Buat kunjungan baru di menu Pendaftaran, atau ubah kata kunci/filter di atas.</div>`; return; }
   const bolehPanggil = !DEMO_MODE && state.user && (["admin","pendaftaran","rekam_medis"].includes(state.user.role) || ["pendaftaran","rekammedis","igd"].some(m=>(state.user.modul||[]).includes(m)));
+  const bolehKelola = !DEMO_MODE && state.user && (["admin","pendaftaran","rekam_medis"].includes(state.user.role) || (state.user.modul||[]).includes("pendaftaran"));
   list.innerHTML = `<div class="card"><table>
     <tr><th>ID</th><th>RM</th><th>Nama</th><th>Jenis</th><th>Poli/Ruangan</th><th>DPJP</th><th>Status</th><th>Antrian</th><th></th></tr>
     ${rows.map(k=>{
@@ -1485,14 +1542,17 @@ async function muatKunjunganAktif(){
       const statusAntrian = k.statusAntrian || "Menunggu";
       const antrianBadge = statusAntrian === "Dipanggil" ? `<span class="badge ok">📢 No. ${noAntrian} — Dipanggil</span>` : `<span class="badge warn">No. ${noAntrian} — Menunggu</span>`;
       const tombolPanggil = bolehPanggil ? `<button class="btn sm ghost" onclick="panggilAntrian('${k.KunjunganID}')">📢 Panggil</button>` : "";
+      const tombolKelola = bolehKelola ? `<button class="btn sm ghost" onclick="mulaiEditKunjungan('${k.id}')">Edit</button>
+        <button class="btn sm danger" onclick="batalkanKunjungan('${k.id}','${(k.nama||k.Nama||"").replace(/'/g,"\\'")}')">Batalkan</button>` : "";
       return `<tr>
       <td>${k.KunjunganID}</td><td>${k.rm||k.RM}</td><td>${k.nama||k.Nama||"-"}</td><td>${k.jenisKunjungan||k.JenisKunjungan}</td>
       <td>${k.poliRuangan||k.PoliRuangan||"-"}</td><td>${k.dpjp||k.DPJP||"-"}</td>
       <td><span class="badge ok">${k.Status}</span></td>
       <td>${antrianBadge}${tombolPanggil}</td>
-      <td><button class="btn sm" onclick="pilihKunjungan('${k.KunjunganID}')">Pilih →</button></td>
+      <td><button class="btn sm" onclick="pilihKunjungan('${k.KunjunganID}')">Pilih →</button> ${tombolKelola}</td>
     </tr>`;}).join("")}
-  </table></div>`;
+  </table></div>
+  <div id="editKunjunganBox"></div>`;
 }
 async function panggilAntrian(kunjunganId){
   const r = await api("antrian.panggil", {kunjunganId}, "POST");
@@ -1500,6 +1560,41 @@ async function panggilAntrian(kunjunganId){
   else toast(r.msg || "Gagal memanggil nomor antrian");
 }
 function pilihKunjungan(id){ state.activeKunjunganId = id; goTo("rekammedis"); }
+
+function mulaiEditKunjungan(id){
+  const k = (window.__kunjunganAktifRows||[]).find(x=>x.id===id);
+  if(!k) return;
+  const box = document.getElementById("editKunjunganBox");
+  box.innerHTML = `<div class="card">
+    <h3>Edit Kunjungan — ${k.nama||k.Nama||"-"} (${k.KunjunganID})</h3>
+    <div class="row">
+      <div><label>Keluhan Utama</label><input id="ekKeluhan" value="${(k.keluhanUtama||"").replace(/"/g,'&quot;')}"></div>
+      <div><label>Poli/Ruangan</label><input id="ekPoli" value="${(k.poliRuangan||k.PoliRuangan||"").replace(/"/g,'&quot;')}"></div>
+    </div>
+    <div class="row">
+      <div><label>DPJP</label><input id="ekDpjp" value="${(k.dpjp||k.DPJP||"").replace(/"/g,'&quot;')}" placeholder="Nama DPJP (manual)"></div>
+      <div><label>DPJP ID (opsional, jika pilih dari pegawai)</label><input id="ekDpjpId" value="${k.dpjpId||""}"></div>
+    </div>
+    <button class="btn" onclick="submitEditKunjungan('${k.id}')">Simpan Perubahan</button>
+    <button class="btn ghost" onclick="document.getElementById('editKunjunganBox').innerHTML=''">Batal</button>
+  </div>`;
+}
+async function submitEditKunjungan(id){
+  const payload = {id, keluhanUtama: val("ekKeluhan"), poliRuangan: val("ekPoli"), dpjp: val("ekDpjp")};
+  const dpjpId = val("ekDpjpId");
+  if(dpjpId) payload.dpjpId = dpjpId;
+  const r = await api("kunjungan.edit", payload, "POST");
+  if(r.ok){ toast("Data kunjungan berhasil diubah"); document.getElementById("editKunjunganBox").innerHTML=""; muatKunjunganAktif(); }
+  else toast(r.msg || "Gagal mengubah data kunjungan");
+}
+async function batalkanKunjungan(id, nama){
+  const alasan = prompt(`Batalkan kunjungan ${nama}?\nWajib isi alasan pembatalan:`);
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast("Alasan pembatalan wajib diisi"); return; }
+  const r = await api("kunjungan.batalkan", {id, alasan: alasan.trim()}, "POST");
+  if(r.ok){ toast("Kunjungan berhasil dibatalkan"); muatKunjunganAktif(); }
+  else toast(r.msg || "Gagal membatalkan kunjungan");
+}
 
 async function patientStrip(kunjunganId){
   if(!kunjunganId) return `<div class="card empty">Belum ada kunjungan dipilih. Ke menu <b>Kunjungan Aktif</b> dulu untuk memilih pasien.</div>`;
@@ -1667,7 +1762,8 @@ async function pageRekamMedis(el){
       <button class="btn" style="margin-top:10px" onclick="submitAdmisi()">Admisi Pasien</button>`}
     </div>` : ""}
     <div class="card">
-      <div class="section-title">Tambah Diagnosa (ICD-10)</div>
+      <div class="section-title" id="diagFormTitle">Tambah Diagnosa (ICD-10)</div>
+      <input type="hidden" id="editDiagId" value="">
       <div class="row"><div><label>Jenis</label><select id="jenisDiag"><option>Utama</option><option>Sekunder</option></select></div>
         <div style="position:relative;"><label>Cari Kode / Deskripsi ICD-10</label>
           <input id="cariICD10" placeholder="ketik kode (A09) atau nama diagnosa..." oninput="cariKode('cariICD10','saranICD10',searchICD10API)">
@@ -1676,9 +1772,11 @@ async function pageRekamMedis(el){
       <div class="row"><div><label>Kode ICD-10 (terpilih)</label><input id="kodeICD10" placeholder="cth: A09"></div>
         <div><label>Deskripsi Diagnosa</label><input id="deskDiag" placeholder="cth: Gastroenteritis akut"></div></div>
       <button class="btn" style="margin-top:10px" onclick="submitDiagnosa()">Tambah Diagnosa</button>
+      <button class="btn ghost" id="btnBatalEditDiag" style="margin-top:10px;display:none" onclick="batalEditDiagnosa()">Batal Edit</button>
     </div>
     <div class="card">
-      <div class="section-title">Tambah Tindakan (ICD-9-CM)</div>
+      <div class="section-title" id="tindakanFormTitle">Tambah Tindakan (ICD-9-CM)</div>
+      <input type="hidden" id="editTindakanId" value="">
       <div style="position:relative;"><label>Cari Kode / Deskripsi ICD-9-CM</label>
         <input id="cariICD9" placeholder="ketik kode (99.29) atau nama tindakan..." oninput="cariKode('cariICD9','saranICD9',searchICD9API)">
         <div id="saranICD9" class="suggest-box"></div>
@@ -1689,6 +1787,7 @@ async function pageRekamMedis(el){
           <input id="pelaksanaManual" style="display:none;margin-top:6px" placeholder="Ketik nama pelaksana manual (kalau belum ada di daftar pegawai)"></div></div>
       <label>Deskripsi Tindakan</label><input id="deskTindakan" placeholder="cth: Injeksi terapeutik">
       <button class="btn" style="margin-top:10px" onclick="submitTindakan()">Tambah Tindakan</button>
+      <button class="btn ghost" id="btnBatalEditTindakan" style="margin-top:10px;display:none" onclick="batalEditTindakan()">Batal Edit</button>
     </div>
   </div>
   <p class="hint">💡 Ketik minimal 2 huruf di kotak pencarian untuk melihat saran kode dari database resmi ICD-10 / ICD-9-CM (7.433 & 3.979 kode). Klik saran untuk mengisi otomatis kode + deskripsi.</p>
@@ -1711,12 +1810,20 @@ async function pageRekamMedis(el){
     <p class="hint">Mengisi hasil dilakukan lewat menu "🧪 Unit Penunjang" oleh petugas Lab/Radiologi.</p>
   </div>` : ""}
   <div class="section-title">Diagnosa Tercatat</div>
-  <div class="card">${d.diagnosa.length ? `<table><tr><th>Jenis</th><th>Kode</th><th>Deskripsi</th></tr>
-    ${d.diagnosa.map(x=>`<tr><td><span class="badge ${x.jenis===('Utama')||x.JenisDiagnosa==='Utama'?'ok':'muted'}">${x.jenis||x.JenisDiagnosa}</span></td><td>${x.kodeICD10||x.KodeICD10}</td><td>${x.deskripsi||x.Deskripsi}</td></tr>`).join("")}
+  <div class="card">${d.diagnosa.length ? `<table><tr><th>Jenis</th><th>Kode</th><th>Deskripsi</th><th></th></tr>
+    ${d.diagnosa.map(x=>`<tr><td><span class="badge ${x.jenis===('Utama')||x.JenisDiagnosa==='Utama'?'ok':'muted'}">${x.jenis||x.JenisDiagnosa}</span></td><td>${x.kodeICD10||x.KodeICD10}</td><td>${x.deskripsi||x.Deskripsi}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick='mulaiEditDiagnosa(${JSON.stringify(x)})'>Edit</button>
+        <button class="btn sm danger" onclick="hapusDiagnosaRow('${x.id}')">Hapus</button>
+      </td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada diagnosa</div>`}</div>
   <div class="section-title">Tindakan Tercatat</div>
-  <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th></tr>
-    ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td></tr>`).join("")}
+  <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th><th></th></tr>
+    ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick='mulaiEditTindakan(${JSON.stringify(x)})'>Edit</button>
+        <button class="btn sm danger" onclick="hapusTindakanRow('${x.id}')">Hapus</button>
+      </td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada tindakan</div>`}</div>
   <div class="section-title">Persetujuan Tindakan Kedokteran (Informed Consent)</div>
   <div class="card">
@@ -1784,13 +1891,67 @@ async function submitPindahKamar(){
   if(r.ok){ toast(r.msg || "Pasien dipindahkan"); render(); } else { toast(r.msg || "Gagal memindahkan pasien"); }
 }
 async function submitDiagnosa(){
-  const r = await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
-  if(r.ok){ toast("Diagnosa ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan diagnosa"); }
+  const editId = val("editDiagId");
+  const r = editId
+    ? await api("diagnosa.edit", {id: editId, jenis:val("jenisDiag"), kodeICD10:val("kodeICD10"), deskripsi:val("deskDiag")}, "POST")
+    : await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
+  if(r.ok){ toast(editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"); batalEditDiagnosa(); render(); } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
+}
+function mulaiEditDiagnosa(x){
+  document.getElementById("diagFormTitle").textContent = "Ubah Diagnosa";
+  document.getElementById("editDiagId").value = x.id;
+  document.getElementById("jenisDiag").value = x.jenis || x.JenisDiagnosa || "Utama";
+  document.getElementById("kodeICD10").value = x.kodeICD10 || x.KodeICD10 || "";
+  document.getElementById("deskDiag").value = x.deskripsi || x.Deskripsi || "";
+  document.getElementById("btnBatalEditDiag").style.display = "inline-block";
+  window.scrollTo(0,0);
+}
+function batalEditDiagnosa(){
+  document.getElementById("diagFormTitle").textContent = "Tambah Diagnosa (ICD-10)";
+  document.getElementById("editDiagId").value = "";
+  document.getElementById("jenisDiag").value = "Utama";
+  document.getElementById("kodeICD10").value = "";
+  document.getElementById("deskDiag").value = "";
+  document.getElementById("btnBatalEditDiag").style.display = "none";
+}
+async function hapusDiagnosaRow(id){
+  if(!confirm("Hapus permanen baris diagnosa ini? (tercatat di Log Audit)")) return;
+  const r = await api("diagnosa.hapus", {id}, "POST");
+  if(r.ok){ toast("Diagnosa dihapus"); render(); } else toast(r.msg || "Gagal menghapus");
 }
 async function submitTindakan(){
   const pelPilih = pegawaiPayload("pelaksanaId","pelaksanaManual");
-  const r = await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
-  if(r.ok){ toast("Tindakan ditambahkan"); render(); } else { toast(r.msg || "Gagal menambahkan tindakan"); }
+  const editId = val("editTindakanId");
+  const r = editId
+    ? await api("tindakan.edit", {id: editId, kodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST")
+    : await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
+  if(r.ok){ toast(editId ? "Tindakan diperbarui" : "Tindakan ditambahkan"); batalEditTindakan(); render(); } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
+}
+function mulaiEditTindakan(x){
+  document.getElementById("tindakanFormTitle").textContent = "Ubah Tindakan";
+  document.getElementById("editTindakanId").value = x.id;
+  document.getElementById("kodeICD9").value = x.kodeICD9 || x.KodeICD9 || "";
+  document.getElementById("deskTindakan").value = x.deskripsi || x.Deskripsi || "";
+  document.getElementById("pelaksanaId").value = "__manual__";
+  document.getElementById("pelaksanaManual").style.display = "block";
+  document.getElementById("pelaksanaManual").value = x.pelaksana || x.Pelaksana || "";
+  document.getElementById("btnBatalEditTindakan").style.display = "inline-block";
+  window.scrollTo(0,0);
+}
+function batalEditTindakan(){
+  document.getElementById("tindakanFormTitle").textContent = "Tambah Tindakan (ICD-9-CM)";
+  document.getElementById("editTindakanId").value = "";
+  document.getElementById("kodeICD9").value = "";
+  document.getElementById("deskTindakan").value = "";
+  document.getElementById("pelaksanaId").value = "";
+  document.getElementById("pelaksanaManual").style.display = "none";
+  document.getElementById("pelaksanaManual").value = "";
+  document.getElementById("btnBatalEditTindakan").style.display = "none";
+}
+async function hapusTindakanRow(id){
+  if(!confirm("Hapus permanen baris tindakan ini? (tercatat di Log Audit)")) return;
+  const r = await api("tindakan.hapus", {id}, "POST");
+  if(r.ok){ toast("Tindakan dihapus"); render(); } else toast(r.msg || "Gagal menghapus");
 }
 
 async function simpanDiagnosaMedisDokter(){
@@ -2110,8 +2271,9 @@ async function pageBilling(el){
     <button class="btn" style="margin-top:10px" onclick="submitBilling()">Tambah</button>
   </div>
   <div class="section-title">Rincian Billing</div>
-  <div class="card">${d.billing.length ? `<table><tr><th>Kategori</th><th>Deskripsi</th><th>Qty</th><th>Tarif Satuan</th><th>Total</th></tr>
-    ${d.billing.map(x=>`<tr><td>${x.kategori||x.Kategori}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.qty||x.Qty}</td><td>Rp${Number(x.tarifSatuan||x.TarifSatuan).toLocaleString('id-ID')}</td><td>Rp${Number(x.Total).toLocaleString('id-ID')}</td></tr>`).join("")}
+  <div class="card">${d.billing.length ? `<table><tr><th>Kategori</th><th>Deskripsi</th><th>Qty</th><th>Tarif Satuan</th><th>Total</th><th></th></tr>
+    ${d.billing.map(x=>`<tr><td>${x.kategori||x.Kategori}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.qty||x.Qty}</td><td>Rp${Number(x.tarifSatuan||x.TarifSatuan).toLocaleString('id-ID')}</td><td>Rp${Number(x.Total).toLocaleString('id-ID')}</td>
+      <td>${x.sumberTabel ? `<span class="hint">otomatis dari order — batalkan order-nya untuk menghapus</span>` : `<button class="btn sm danger" onclick="hapusBillingRow('${x.id}')">Hapus</button>`}</td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada billing</div>`}
   <div style="text-align:right;margin-top:10px;font-size:16px;font-weight:700;color:var(--teal-dk)">Total: Rp${total.toLocaleString('id-ID')}</div>
   </div>
@@ -2184,6 +2346,13 @@ async function muatLaporanKasHarian(){
 async function submitBilling(){
   const r = await api("tambahBilling", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kategori:val("kategori"), Kategori:val("kategori"), deskripsi:val("deskBilling"), Deskripsi:val("deskBilling"), qty:val("qty"), Qty:val("qty"), tarifSatuan:val("tarifSatuan"), TarifSatuan:val("tarifSatuan")}, "POST");
   if(r.ok){ toast("Item billing ditambahkan"); render(); }
+}
+async function hapusBillingRow(id){
+  const alasan = prompt("Alasan penghapusan baris billing ini (wajib diisi, tersimpan di Log Audit):");
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast("Alasan penghapusan wajib diisi"); return; }
+  const r = await api("billing.hapus", {id, alasan: alasan.trim()}, "POST");
+  if(r.ok){ toast("Baris billing dihapus"); render(); } else toast(r.msg || "Gagal menghapus");
 }
 async function submitPembayaran(){
   const jumlah = Number(val("pyJumlah"))||0;
@@ -3012,8 +3181,44 @@ async function renderPenunjangTab(tab){
         </div>
       </div>` : ""}
       <div class="section-title" style="margin-top:16px">Daftar Stok BHP/Alkes</div>
-      ${pjTable(bhpRows, ['kode','nama','kategori','satuan','stok','stokMinimal','statusStok'])}`;
+      ${renderBhpList(bhpRows, bolehKelola)}`;
   }
+}
+function renderBhpList(rows, bolehKelola){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada item BHP/Alkes di master</div>';
+  return `<table><tr><th>Kode</th><th>Nama</th><th>Kategori</th><th>Satuan</th><th>Stok</th><th>Stok Minimal</th><th>Status Stok</th><th>Status</th>${bolehKelola?'<th></th>':''}</tr>
+    ${rows.map(b=>`<tr${b.aktif===false?' style="opacity:0.55"':''}>
+      <td>${b.kode}</td>
+      <td>${bolehKelola ? `<input id="bhpNamaEdit_${b.kode}" value="${(b.nama||'').replace(/"/g,'&quot;')}" style="min-width:140px">` : b.nama}</td>
+      <td>${bolehKelola ? `<input id="bhpKategoriEdit_${b.kode}" value="${(b.kategori||'').replace(/"/g,'&quot;')}" style="min-width:110px">` : (b.kategori||'-')}</td>
+      <td>${b.satuan||'-'}</td>
+      <td>${b.stok}</td>
+      <td>${bolehKelola ? `<input id="bhpStokMinEdit_${b.kode}" type="number" value="${b.stokMinimal}" style="width:70px">` : b.stokMinimal}</td>
+      <td>${b.statusStok||'-'}</td>
+      <td>${b.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      ${bolehKelola ? `<td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="submitEditBhp('${b.kode}')">Simpan Perubahan</button>
+        <button class="btn sm" onclick="submitSetAktifBhp('${b.kode}',${b.aktif===false})">${b.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick="submitHapusBhp('${b.kode}')">Hapus</button>
+      </td>` : ''}
+    </tr>`).join("")}
+  </table>${bolehKelola ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau item ini belum pernah punya riwayat mutasi stok (belum pernah ditambah/dipakai). Mengubah stok tetap wajib lewat "Tambah Stok"/"Catat Pemakaian" supaya riwayat mutasi tetap akurat.</p>' : ''}`;
+}
+async function submitEditBhp(kode){
+  const nama = val('bhpNamaEdit_'+kode);
+  if(!nama){ toast('Nama item wajib diisi'); return; }
+  const r = await api('bhp.editMaster', {kode, nama, kategori: val('bhpKategoriEdit_'+kode), stokMinimal: Number(val('bhpStokMinEdit_'+kode))||0}, 'POST');
+  if(r.ok){ toast('Perubahan item disimpan'); renderPenunjangTab('bhp'); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitSetAktifBhp(kode, aktifBaru){
+  const r = await api('bhp.setAktif', {kode, aktif: aktifBaru}, 'POST');
+  if(r.ok){ toast(aktifBaru ? 'Item diaktifkan kembali' : 'Item dinonaktifkan'); renderPenunjangTab('bhp'); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitHapusBhp(kode){
+  if(!confirm(`Hapus permanen item "${kode}" dari master BHP/Alkes?\n\nHanya berhasil kalau belum pernah ada riwayat mutasi stok.`)) return;
+  const r = await api('bhp.hapus', {kode}, 'POST');
+  toast(r.ok ? 'Item dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) renderPenunjangTab('bhp');
 }
 async function bhpCatatPemakaian(){
   const kode = val('bhp_kode');
@@ -3043,17 +3248,31 @@ function renderGiziList(rows, bolehProses){
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Ruang_Kelas||"-"} — ${r.Jenis_Diet||"-"}</div>
-        <span class="badge ${r.Status==='Disajikan'?'ok':'muted'}">${r.Status||'Aktif'}</span>
+        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Ruang_Kelas||"-"} — ${r.Jenis_Diet||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokter ? ` — Dokter: ${r.dokter}` : ""}</div>
+        <span class="badge ${r.Status==='Disajikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Aktif'}</span>
       </div>
       ${r.Status==='Disajikan'
         ? `<div class="hint" style="margin-top:6px">Disajikan oleh ${r.petugasSaji||"-"}, ${new Date(r.waktuDisajikan).toLocaleString('id-ID')}</div>`
-        : (bolehProses ? `<button class="btn sm" style="margin-top:6px" onclick="giziTandaiDisajikan('${r.id}')">🍽️ Tandai Sudah Disajikan</button>` : `<div class="hint" style="margin-top:6px">Menunggu disajikan</div>`)}
+        : r.Status==='Dibatalkan'
+          ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>`
+          : (bolehProses ? `<button class="btn sm" style="margin-top:6px" onclick="giziTandaiDisajikan('${r.id}')">🍽️ Tandai Sudah Disajikan</button>
+              <button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('gizi.batalkan','${r.id}','gizi')">Batalkan</button>` : `<div class="hint" style="margin-top:6px">Menunggu disajikan</div>`)}
     </div>`).join("");
 }
 async function giziTandaiDisajikan(id){
   const r = await api('gizi.setDisajikan', {id, petugas: state.user.nama}, 'POST');
   if(r.ok){ toast('Ditandai sudah disajikan'); renderPenunjangTab('gizi'); } else toast(r.msg || 'Gagal menyimpan');
+}
+/* Pembatalan order penunjang (Lab/Radiologi/Gizi/CSSD/Linen/Jenazah) --
+   selalu minta alasan wajib, baris Billing otomatis yang sudah tercipta dari
+   order ini ikut terhapus otomatis di sisi server. */
+async function batalkanOrderPenunjang(action, id, tab){
+  const alasan = prompt('Alasan pembatalan (wajib diisi):');
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast('Alasan pembatalan wajib diisi'); return; }
+  const r = await api(action, {id, alasan: alasan.trim()}, 'POST');
+  toast(r.ok ? 'Order dibatalkan' : (r.msg || 'Gagal membatalkan'));
+  if(r.ok) renderPenunjangTab(tab);
 }
 
 /* ===== CSSD: alur bertahap Diterima -> Disterilkan -> Dikembalikan ===== */
@@ -3063,13 +3282,14 @@ function renderCssdList(rows, bolehProses){
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Alat_Set||"-"} (${r.Jumlah||1})</div>
-        <span class="badge ${r.Status==='Dikembalikan'?'ok':'muted'}">${r.Status}</span>
+        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Alat_Set||"-"} (${r.Jumlah||1})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
+        <span class="badge ${r.Status==='Dikembalikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>
       </div>
       <div class="hint" style="margin-top:4px">
-        ${r.waktuSteril ? `Disterilkan: ${new Date(r.waktuSteril).toLocaleString('id-ID')}. ` : ""}${r.waktuKembali ? `Dikembalikan: ${new Date(r.waktuKembali).toLocaleString('id-ID')} oleh ${r.petugasProses||"-"}` : ""}
+        ${r.waktuSteril ? `Disterilkan: ${new Date(r.waktuSteril).toLocaleString('id-ID')}. ` : ""}${r.waktuKembali ? `Dikembalikan: ${new Date(r.waktuKembali).toLocaleString('id-ID')} oleh ${r.petugasProses||"-"}` : ""}${r.Status==='Dibatalkan' ? `Dibatalkan — alasan: ${r.alasanBatal||"-"}` : ""}
       </div>
       ${(bolehProses && langkahBerikut[r.Status]) ? `<button class="btn sm" style="margin-top:6px" onclick="cssdLanjutStatus('${r.ID_CSSD}','${langkahBerikut[r.Status]}')">➡️ Tandai ${langkahBerikut[r.Status]}</button>` : ""}
+      ${(bolehProses && r.Status==='Diterima') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('cssd.batalkan','${r.ID_CSSD}','cssd')">Batalkan</button>` : ""}
     </div>`).join("");
 }
 async function cssdLanjutStatus(id, statusBaru){
@@ -3083,14 +3303,17 @@ function renderLinenList(rows, bolehProses){
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Linen||"-"} (kotor: ${r.Jumlah_Kotor||0})</div>
-        <span class="badge ${r.Status==='Selesai'?'ok':'muted'}">${r.Status||'Proses'}</span>
+        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Linen||"-"} (kotor: ${r.Jumlah_Kotor||0})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
+        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Proses'}</span>
       </div>
       ${r.Status==='Selesai'
         ? `<div class="hint" style="margin-top:6px">Bersih &amp; dikembalikan: ${r.Jumlah_Bersih??0} — oleh ${r.petugasKembali||"-"}, ${new Date(r.waktuKembali).toLocaleString('id-ID')}</div>`
-        : (bolehProses ? `
+        : r.Status==='Dibatalkan'
+          ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>`
+          : (bolehProses ? `
           <div class="row" style="margin-top:6px"><input id="linenBersih_${r.ID_Linen}" type="number" placeholder="Jumlah bersih">
-          <button class="btn sm" onclick="linenTandaiBersih('${r.ID_Linen}')">🧺 Tandai Bersih &amp; Dikembalikan</button></div>
+          <button class="btn sm" onclick="linenTandaiBersih('${r.ID_Linen}')">🧺 Tandai Bersih &amp; Dikembalikan</button>
+          <button class="btn sm danger" onclick="batalkanOrderPenunjang('linen.batalkan','${r.ID_Linen}','linen')">Batalkan</button></div>
         ` : `<div class="hint" style="margin-top:6px">Masih diproses</div>`)}
     </div>`).join("");
 }
@@ -3120,7 +3343,7 @@ async function submitJenazahBaru(){
 function renderJenazahList(rows, bolehProses){
   if(!rows || !rows.length) return '<div class="empty">Belum ada kasus pemulasaraan jenazah</div>';
   const langkahBerikut = {'Menunggu':'Diproses', 'Diproses':'Selesai', 'Selesai':'Diambil Keluarga'};
-  const badgeCls = {'Menunggu':'muted','Diproses':'warn','Selesai':'ok','Diambil Keluarga':'ok'};
+  const badgeCls = {'Menunggu':'muted','Diproses':'warn','Selesai':'ok','Diambil Keluarga':'ok','Dibatalkan':'danger'};
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -3135,9 +3358,12 @@ function renderJenazahList(rows, bolehProses){
       ${r.catatan ? `<div class="hint" style="margin-top:4px">Catatan: ${r.catatan}</div>` : ""}
       ${r.status==='Diambil Keluarga'
         ? `<div class="hint" style="margin-top:6px">Diserahterimakan oleh ${r.petugasSerahTerima||"-"}, ${r.waktuDiambil ? new Date(r.waktuDiambil).toLocaleString('id-ID') : "-"}</div>`
-        : (bolehProses && langkahBerikut[r.status])
+        : r.status==='Dibatalkan'
+          ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>`
+          : (bolehProses && langkahBerikut[r.status])
           ? `${langkahBerikut[r.status]==='Diambil Keluarga' ? `<input id="jzPetugasServis_${r.id}" placeholder="Nama petugas serah terima" style="margin-top:6px">` : ""}
-             <button class="btn sm" style="margin-top:6px" onclick="jenazahLanjutStatus('${r.id}','${langkahBerikut[r.status]}')">➡️ Tandai ${langkahBerikut[r.status]}</button>`
+             <button class="btn sm" style="margin-top:6px" onclick="jenazahLanjutStatus('${r.id}','${langkahBerikut[r.status]}')">➡️ Tandai ${langkahBerikut[r.status]}</button>
+             ${(bolehProses && r.status==='Menunggu') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('jenazah.batalkan','${r.id}','jenazah')">Batalkan</button>` : ""}`
           : ""}
     </div>`).join("");
 }
@@ -3392,10 +3618,10 @@ function renderOrderList(rows, jenis, bolehIsiHasil){
   return rows.map(r => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Jenis_Pemeriksaan||"-"}</div>
-        <span class="badge ${r.Status==='Selesai'?'ok':'muted'}">${r.Status}</span>
+        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Jenis_Pemeriksaan||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokterPengirim ? ` — Dokter Pengirim: ${r.dokterPengirim}` : ""}</div>
+        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>
       </div>
-      ${r.hasil ? `
+      ${r.Status==='Dibatalkan' ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>` : r.hasil ? `
         <div style="margin-top:6px"><b>Hasil:</b> ${r.hasil}</div>
         <div class="hint">Diisi oleh ${r.namaPengisiHasil||"-"} (${r.profesiPengisiHasil||"-"}), ${new Date(r.waktuHasil).toLocaleString('id-ID')}</div>
         ${r.nilaiKritis ? `
@@ -3423,6 +3649,7 @@ function renderOrderList(rows, jenis, bolehIsiHasil){
         </div>
         <button class="btn sm" style="margin-top:6px" onclick="isiHasilPemeriksaan('${jenis}','${r.ID_Order}')">Simpan Hasil</button>
       ` : `<div class="hint" style="margin-top:6px">Belum ada hasil</div>`)}
+      ${(r.Status==='Menunggu') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('${jenis}.batalkan','${r.ID_Order}','${jenis}')">Batalkan</button>` : ""}
     </div>`).join("");
 }
 function toggleFormKritis(orderId){
@@ -3448,11 +3675,43 @@ async function isiHasilPemeriksaan(jenis, orderId){
 /* ===== Farmasi: master obat & verifikasi resep ===== */
 function pjTableObat(rows, bolehEditHarga){
   if(!rows || !rows.length) return '<div class="empty">Belum ada obat di master</div>';
-  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Jual (Rp)</th><th>High-Alert</th></tr>
-    ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}><td>${o.kode}</td><td>${o.namaObat}</td><td class="hint">${o.namaGenerik||"-"}</td><td>${o.stok}</td><td>${o.stokMinimal}</td><td>${o.satuan||"-"}</td>
+  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Jual (Rp)</th><th>High-Alert</th><th>Status</th>${bolehEditHarga?'<th></th>':''}</tr>
+    ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}${o.aktif===false?' style="opacity:0.55"':''}>
+      <td>${o.kode}</td>
+      <td>${bolehEditHarga ? `<input id="obatNamaEdit_${o.kode}" value="${(o.namaObat||'').replace(/"/g,'&quot;')}" style="min-width:140px">` : o.namaObat}</td>
+      <td class="hint">${bolehEditHarga ? `<input id="obatGenerikEdit_${o.kode}" value="${(o.namaGenerik||'').replace(/"/g,'&quot;')}" style="min-width:120px">` : (o.namaGenerik||"-")}</td>
+      <td>${o.stok}</td>
+      <td>${bolehEditHarga ? `<input id="obatStokMinEdit_${o.kode}" type="number" value="${o.stokMinimal}" style="width:70px">` : o.stokMinimal}</td>
+      <td>${o.satuan||"-"}</td>
       <td>${bolehEditHarga ? `<div style="display:flex;gap:4px"><input id="obatHarga_${o.kode}" type="number" value="${o.hargaJual||0}" style="width:90px"><button class="btn sm" onclick="submitSetHargaObat('${o.kode}')">Simpan</button></div>` : `Rp ${Number(o.hargaJual||0).toLocaleString('id-ID')}`}${!o.hargaJual ? `<div class="hint" style="color:var(--red)">Belum diisi — obat ini belum bisa tertagih otomatis ke Billing</div>` : ""}</td>
-      <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td></tr>`).join("")}
-  </table>`;
+      <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td>
+      <td>${o.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      ${bolehEditHarga ? `<td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="submitEditObat('${o.kode}')">Simpan Perubahan</button>
+        <button class="btn sm" onclick="submitSetAktifObat('${o.kode}',${o.aktif===false})">${o.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick="submitHapusObat('${o.kode}')">Hapus</button>
+      </td>` : ''}
+    </tr>`).join("")}
+  </table>${bolehEditHarga ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau obat ini belum pernah dipakai di resep/batch manapun. Mengubah stok tetap wajib lewat "Tambah Stok" (bukan di sini) supaya riwayat batch/kadaluarsa tetap akurat.</p>' : ''}`;
+}
+async function submitEditObat(kode){
+  const namaObat = val('obatNamaEdit_'+kode);
+  if(!namaObat){ toast('Nama obat wajib diisi'); return; }
+  const r = await api('farmasi.editObat', {
+    kode, namaObat, namaGenerik: val('obatGenerikEdit_'+kode),
+    stokMinimal: Number(val('obatStokMinEdit_'+kode))||0
+  }, 'POST');
+  if(r.ok){ toast('Perubahan obat disimpan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitSetAktifObat(kode, aktifBaru){
+  const r = await api('farmasi.setAktifObat', {kode, aktif: aktifBaru}, 'POST');
+  if(r.ok){ toast(aktifBaru ? 'Obat diaktifkan kembali' : 'Obat dinonaktifkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitHapusObat(kode){
+  if(!confirm(`Hapus permanen obat "${kode}" dari master?\n\nHanya berhasil kalau belum pernah dipakai di resep/batch manapun.`)) return;
+  const r = await api('farmasi.hapusObat', {kode}, 'POST');
+  toast(r.ok ? 'Obat dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) renderPenunjangTab('farmasi');
 }
 async function submitSetHargaObat(kode){
   const harga = Number(val('obatHarga_'+kode)) || 0;
@@ -3823,7 +4082,7 @@ async function renderTarifTab(tab){
       <button class="btn" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0,kelasRawatInap:val('tf_kelasri')},'inap')">Simpan</button>
       <div id="tfList" style="margin-top:14px"></div>`;
     const rows = await api('tarif.listRawatInap', {}, 'POST');
-    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Kelas','Nama_Kelas','Tarif_Kamar_Per_Hari','Tarif_Visite_Dokter_Umum','Tarif_Visite_Dokter_Spesialis','Kelas_Rawat_Inap']);
+    document.getElementById('tfList').innerHTML = renderTarifInapList(rows);
   } else if (tab === 'jalan') {
     body.innerHTML = `
       <label>Kode Poli</label><input id="tf_kode">
@@ -3834,7 +4093,7 @@ async function renderTarifTab(tab){
       <button class="btn" onclick="tfSubmit('tarif.tambahPoli',{kode:val('tf_kode'),nama:val('tf_nama'),tarifUmum:Number(val('tf_umum'))||0,tarifSpesialis:Number(val('tf_spesialis'))||0,tarifAdministrasi:Number(val('tf_admin'))||0},'jalan')">Simpan</button>
       <div id="tfList" style="margin-top:14px"></div>`;
     const rows = await api('tarif.listRawatJalan', {}, 'POST');
-    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Poli','Nama_Poli','Tarif_Konsultasi_Umum','Tarif_Konsultasi_Spesialis']);
+    document.getElementById('tfList').innerHTML = renderTarifJalanList(rows);
   } else if (TARIF_UNIT_LABEL[tab]) {
     // Tab per-unit (lab/radiologi/gizi/cssd/linen/jenazah/lainnya) --
     // semuanya memakai tarif_layanan yang sama, dibedakan lewat kolom "unit".
@@ -3863,12 +4122,80 @@ function renderTarifLayananList(rows, tab){
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Nama_Layanan}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp ${Number(r.Tarif||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
-      <td style="padding:6px;border-bottom:1px solid var(--line)"><button class="btn sm ghost" onclick="tfSetAktif('${r.Kode_Layanan}',${r.aktif===false},'${tab}')">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button></td>
-    </tr>`).join("") + '</table>';
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfSetAktif('${r.Kode_Layanan}',${r.aktif===false},'${tab}')">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick="tfHapusLayanan('${r.Kode_Layanan}','${tab}')">Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>' +
+    '<p class="hint">Tombol "Hapus" hanya berhasil kalau tarif ini belum pernah dipakai di order Lab/Radiologi/Gizi/CSSD/Linen/Jenazah manapun — kalau sudah pernah, sistem menolak &amp; menyarankan "Nonaktifkan" saja.</p>';
+}
+async function tfHapusLayanan(kode, tab){
+  if(!confirm(`Hapus permanen tarif "${kode}"?\n\nHanya berhasil kalau tarif ini belum pernah dipakai di order manapun.`)) return;
+  const r = await api('tarif.hapusLayanan', {kode}, 'POST');
+  toast(r.ok ? 'Tarif dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok){ delete tarifUnitCache[tab]; renderTarifTab(tab); }
 }
 async function tfSetAktif(kode, aktifBaru, tab){
   const r = await api('tarif.setAktifLayanan', {kode, aktif: aktifBaru}, 'POST');
   if(r.ok){ toast(aktifBaru ? 'Tarif diaktifkan kembali' : 'Tarif dinonaktifkan — tidak akan muncul lagi di pilihan order baru'); renderTarifTab(tab); } else toast(r.msg || 'Gagal menyimpan');
+}
+function renderTarifInapList(rows){
+  if(!rows || !rows.length) return '<p class="sub">Belum ada data.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode_Kelas</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama_Kelas</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Kamar_Per_Hari</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Visite_Dokter_Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Visite_Dokter_Spesialis</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas_Rawat_Inap</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    rows.map(r => `<tr${r.aktif===false?' style="color:var(--muted)"':''}>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kode_Kelas}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Nama_Kelas}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Kamar_Per_Hari ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Visite_Dokter_Umum ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Visite_Dokter_Spesialis ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kelas_Rawat_Inap ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfInapSetAktif('${r.Kode_Kelas}',${r.aktif===false})">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick="tfInapHapus('${r.Kode_Kelas}')">Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>' +
+    '<p class="hint">Tombol "Hapus" hanya berhasil kalau kelas ini belum pernah dipakai di data Rawat Inap manapun.</p>';
+}
+async function tfInapSetAktif(kode, aktifBaru){
+  const r = await api('tarif.setAktifInap', {kode, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru ? 'Kelas diaktifkan kembali' : 'Kelas dinonaktifkan') : (r.msg || 'Gagal menyimpan'));
+  if(r.ok) renderTarifTab('inap');
+}
+async function tfInapHapus(kode){
+  if(!confirm(`Hapus permanen kelas rawat inap "${kode}"?\n\nHanya berhasil kalau belum pernah dipakai di data Rawat Inap manapun.`)) return;
+  const r = await api('tarif.hapusInap', {kode}, 'POST');
+  toast(r.ok ? 'Kelas dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) renderTarifTab('inap');
+}
+function renderTarifJalanList(rows){
+  if(!rows || !rows.length) return '<p class="sub">Belum ada data.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Spesialis</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    rows.map(r => `<tr${r.aktif===false?' style="color:var(--muted)"':''}>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kode_Poli}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Nama_Poli}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Konsultasi_Umum ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Konsultasi_Spesialis ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfJalanSetAktif('${r.Kode_Poli}',${r.aktif===false})">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick="tfJalanHapus('${r.Kode_Poli}')">Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>' +
+    '<p class="hint">Tombol "Hapus" hanya berhasil kalau poli ini kemungkinan belum pernah dipakai di kunjungan manapun (dicocokkan dari nama poli).</p>';
+}
+async function tfJalanSetAktif(kode, aktifBaru){
+  const r = await api('tarif.setAktifJalan', {kode, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru ? 'Poli diaktifkan kembali' : 'Poli dinonaktifkan') : (r.msg || 'Gagal menyimpan'));
+  if(r.ok) renderTarifTab('jalan');
+}
+async function tfJalanHapus(kode){
+  if(!confirm(`Hapus permanen poli "${kode}"?\n\nHanya berhasil kalau poli ini belum pernah dipakai di kunjungan manapun.`)) return;
+  const r = await api('tarif.hapusJalan', {kode}, 'POST');
+  toast(r.ok ? 'Poli dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) renderTarifTab('jalan');
 }
 
 async function tfSubmit(action, data, tab){
