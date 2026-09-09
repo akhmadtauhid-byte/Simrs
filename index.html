@@ -494,6 +494,25 @@ function pegawaiPayload(selectId, manualId){
   if(sel.value) return {id: sel.value, nama:""};
   return {id:"", nama:""};
 }
+// Sama seperti isiSelectPegawai, TAPI tanpa pilihan "Lainnya (ketik manual)" --
+// dipakai untuk mengelola Template Obat per Dokter, yang WAJIB terikat ke
+// pegawai_id sungguhan (bukan nama bebas).
+async function isiSelectPegawaiPolos(selectId, placeholder){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const list = await getPegawaiCache();
+  sel.innerHTML = `<option value="">${placeholder||"-- Pilih --"}</option>` +
+    list.map(p=>`<option value="${p.id}">${(p.nama||"").replace(/</g,"&lt;")}${p.jabatan?(" — "+(p.jabatan||"").replace(/</g,"&lt;")):""}</option>`).join("");
+}
+// Isi <select> dengan daftar Poli aktif dari Master Tarif Rawat Jalan.
+async function isiSelectPoliFavorit(selectId, placeholder){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const rows = await api('tarif.listRawatJalan', {}, 'POST');
+  const aktifRows = (rows||[]).filter(r=>r.aktif !== false);
+  sel.innerHTML = `<option value="">${placeholder||"-- Pilih Poli (opsional) --"}</option>` +
+    aktifRows.map(r=>`<option value="${r.Kode_Poli}">${(r.Nama_Poli||"").replace(/</g,"&lt;")}</option>`).join("");
+}
 
 async function pageKelolaPegawai(){
   const m = document.getElementById("main");
@@ -1476,7 +1495,7 @@ function cariKode(inputId, boxId, searchFn){
   searchDebounce = setTimeout(async ()=>{
     const results = await searchFn(q);
     if(!results.length){ box.innerHTML = `<div class="suggest-item" style="color:var(--muted)">Tidak ada hasil</div>`; box.classList.add("show"); return; }
-    box.innerHTML = results.map(r=>`<div class="suggest-item" onclick='pilihKode(${JSON.stringify(inputId)}, ${JSON.stringify(boxId)}, ${JSON.stringify(r.Kode||r.kode)}, ${JSON.stringify((r.Deskripsi||r.deskripsi||"").replace(/'/g,"&#39;"))})'><b>${r.Kode||r.kode}</b> — ${r.Deskripsi||r.deskripsi}</div>`).join("");
+    box.innerHTML = results.map(r=>`<div class="suggest-item" onclick='pilihKode(${JSON.stringify(inputId)}, ${JSON.stringify(boxId)}, ${JSON.stringify(r.Kode||r.kode)}, ${JSON.stringify((r.Deskripsi||r.deskripsi||"").replace(/'/g,"&#39;"))})'><b>${r.Kode||r.kode}</b> — ${r.Deskripsi||r.deskripsi} ${(r.Resmi||r.resmi) ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''}</div>`).join("");
     box.classList.add("show");
   }, 250);
 }
@@ -1488,18 +1507,18 @@ function pilihKode(inputId, boxId, kode, desk){
 }
 // Fallback offline ringkas untuk mode demo (database lengkap 7.433/3.979 kode ada di backend Apps Script)
 const ICD10_DEMO_FALLBACK = [
-  {Kode:"A09", Deskripsi:"Diarrhoea and gastro-enteritis of presumed infectious origin"},
-  {Kode:"A49.9", Deskripsi:"Bacterial infection, unspecified"},
-  {Kode:"I50.0", Deskripsi:"Congestive heart failure"},
-  {Kode:"I11.9", Deskripsi:"Hypertensive heart disease without (congestive) heart failure"},
-  {Kode:"J18.9", Deskripsi:"Pneumonia, unspecified"},
-  {Kode:"Z09.8", Deskripsi:"Follow-up examination after other treatment for other conditions"},
+  {Kode:"A09", Deskripsi:"Diarrhoea and gastro-enteritis of presumed infectious origin", Resmi:true},
+  {Kode:"A49.9", Deskripsi:"Bacterial infection, unspecified", Resmi:true},
+  {Kode:"I50.0", Deskripsi:"Congestive heart failure", Resmi:true},
+  {Kode:"I11.9", Deskripsi:"Hypertensive heart disease without (congestive) heart failure", Resmi:true},
+  {Kode:"J18.9", Deskripsi:"Pneumonia, unspecified", Resmi:true},
+  {Kode:"Z09.8", Deskripsi:"Follow-up examination after other treatment for other conditions", Resmi:true},
 ];
 const ICD9_DEMO_FALLBACK = [
-  {Kode:"99.29", Deskripsi:"Injection or infusion of other therapeutic or prophylactic substance"},
-  {Kode:"93.57", Deskripsi:"Application of other wound dressing"},
-  {Kode:"88.72", Deskripsi:"Diagnostic ultrasound of heart"},
-  {Kode:"45.13", Deskripsi:"Other endoscopy of small intestine"},
+  {Kode:"99.29", Deskripsi:"Injection or infusion of other therapeutic or prophylactic substance", Resmi:true},
+  {Kode:"93.57", Deskripsi:"Application of other wound dressing", Resmi:true},
+  {Kode:"88.72", Deskripsi:"Diagnostic ultrasound of heart", Resmi:true},
+  {Kode:"45.13", Deskripsi:"Other endoscopy of small intestine", Resmi:true},
 ];
 async function searchICD10API(q){
   if(DEMO_MODE){ q=q.toLowerCase(); return ICD10_DEMO_FALLBACK.filter(r=>r.Kode.toLowerCase().includes(q)||r.Deskripsi.toLowerCase().includes(q)); }
@@ -2032,8 +2051,8 @@ async function kumpulkanSaranKode(kataKunci, searchFn){
   for(const kw of kataKunci){
     const hasil = await searchFn(kw);
     (hasil||[]).forEach(r=>{
-      const kode = r.Kode||r.kode, desk = r.Deskripsi||r.deskripsi;
-      if(!skor[kode]) skor[kode] = {kode, desk, cocok:0};
+      const kode = r.Kode||r.kode, desk = r.Deskripsi||r.deskripsi, resmi = !!(r.Resmi||r.resmi);
+      if(!skor[kode]) skor[kode] = {kode, desk, resmi, cocok:0};
       skor[kode].cocok++;
     });
   }
@@ -2048,7 +2067,7 @@ async function analisaKodeDariDiagnosa(){
   if(!kataKunci.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box9.innerHTML=""; return; }
   toast("Menganalisa "+kataKunci.length+" kata kunci dari kalimat diagnosa...");
   const [saran10, saran9] = await Promise.all([ kumpulkanSaranKode(kataKunci, searchICD10API), kumpulkanSaranKode(kataKunci, searchICD9API) ]);
-  const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
+  const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} ${r.resmi ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
   box10.innerHTML = saran10.length ? saran10.map(baris("icd10")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
   box9.innerHTML = saran9.length ? saran9.map(baris("icd9")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-9-CM yang cocok dengan kalimat ini</div>`;
   toast("Saran kode ditemukan — klik salah satu untuk mengisi otomatis (tetap cek ulang kecocokannya)");
@@ -2999,7 +3018,9 @@ async function renderPenunjangTab(tab){
   } else if (tab === 'farmasi') {
     const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
     const obatRows = await api('farmasi.listObat', {}, 'POST');
+    window.__obatRowsCache = obatRows || [];
     const obatOptions = (obatRows||[]).map(o=>`<option value="${o.kode}">${o.namaObat} (stok ${o.stok}${o.satuan?(' '+o.satuan):''})</option>`).join("");
+    resepCart = [];
     body.innerHTML = `
       <div class="section-title">Buat Resep Baru</div>
       <div style="position:relative;"><label>No. RM</label>
@@ -3007,11 +3028,27 @@ async function renderPenunjangTab(tab){
         <div id="pj_saranPasien" class="suggest-box"></div>
       </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
-      <label>Dokter</label><input id="pj_dokter">
+      <div class="row">
+        <div><label>Dokter</label>
+          <select id="pj_dokterId" onchange="onPegawaiSelectChange('pj_dokterId','pj_dokterManual');muatObatFavoritQuickPick();"><option value="">Memuat daftar pegawai...</option></select>
+          <input id="pj_dokterManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter manual" oninput="muatObatFavoritQuickPick()">
+        </div>
+        <div><label>Poli (opsional — tampilkan juga favorit obat Poli ybs)</label>
+          <select id="pj_poliFavorit" onchange="muatObatFavoritQuickPick()"><option value="">Memuat daftar poli...</option></select>
+        </div>
+      </div>
+      <p class="hint">Daftar favorit di bawah ini cuma REKOMENDASI pintasan supaya lebih cepat — obat lain di luar daftar tetap selalu bisa dicari &amp; dipilih lewat dropdown "Obat".</p>
+      <div id="obatFavoritQuickPick"><div class="hint">Pilih dokter dan/atau Poli di atas untuk lihat rekomendasi obat favoritnya.</div></div>
+
+      <div class="section-title" style="margin-top:16px">Tambah Obat ke Resep</div>
       <label>Obat</label><select id="pj_kode"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
       <label>Jumlah</label><input id="pj_jumlah" type="number" value="1">
       <label>Aturan Pakai</label><input id="pj_aturan" placeholder="3x1 sesudah makan">
-      <button class="btn" onclick="pjSubmit('farmasi.buatResep',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),dokter:val('pj_dokter'),petugas:state.user.nama,items:[{kode:val('pj_kode'),jumlah:Number(val('pj_jumlah'))||1,aturanPakai:val('pj_aturan')}]})">Simpan Resep</button>
+      <button class="btn sm ghost" style="margin-top:6px" onclick="tambahKeKeranjangResep()">+ Tambah ke Keranjang</button>
+
+      <div class="section-title" style="margin-top:16px">Keranjang Resep</div>
+      <div id="keranjangResep"></div>
+      <button class="btn" style="margin-top:10px" onclick="submitResepDariKeranjang()">Simpan Resep</button>
       ${!obatRows.length ? `<p class="hint">Belum ada obat terdaftar di master obat — tambahkan dulu di bagian bawah sebelum bisa membuat resep.</p>` : ""}
       ${bolehKelola ? `
       <div class="section-title" style="margin-top:20px">Kelola Master Obat &amp; Stok</div>
@@ -3045,9 +3082,40 @@ async function renderPenunjangTab(tab){
         <div style="align-self:flex-end"><button class="btn sm" onclick="muatObatKadaluarsa()">Tampilkan</button></div>
       </div>
       <div id="obatKadaluarsaList" style="margin-top:10px">Memuat...</div>
+      <div class="section-title" style="margin-top:20px">⭐ Kelola Template Obat (per Dokter &amp; per Poli)</div>
+      <p class="hint">Daftar ini jadi rekomendasi cepat saat membuat resep di atas — TIDAK membatasi, dokter/staf tetap bisa memilih obat lain di luar daftar ini kapan saja.</p>
+      <div class="grid cols2">
+        <div class="card">
+          <label>Template per Dokter</label>
+          <select id="tplDokterId" onchange="muatTemplateDokter()"><option value="">Memuat daftar pegawai...</option></select>
+          <div class="row" style="margin-top:6px">
+            <select id="tplDokterObat"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
+            <input id="tplDokterCatatan" placeholder="Catatan dosis (opsional, cth: 3x1 sesudah makan)">
+          </div>
+          <button class="btn sm" style="margin-top:6px" onclick="submitTambahTemplateDokter()">+ Tambah ke Template Dokter</button>
+          <div id="tplDokterList" style="margin-top:10px"><div class="hint">Pilih dokter di atas untuk lihat/kelola templatenya.</div></div>
+        </div>
+        <div class="card">
+          <label>Template per Poli</label>
+          <select id="tplPoliKode" onchange="muatTemplatePoli()"><option value="">Memuat daftar poli...</option></select>
+          <div class="row" style="margin-top:6px">
+            <select id="tplPoliObat"><option value="">-- Pilih Obat --</option>${obatOptions}</select>
+            <input id="tplPoliCatatan" placeholder="Catatan dosis (opsional)">
+          </div>
+          <button class="btn sm" style="margin-top:6px" onclick="submitTambahTemplatePoli()">+ Tambah ke Template Poli</button>
+          <div id="tplPoliList" style="margin-top:10px"><div class="hint">Pilih Poli di atas untuk lihat/kelola templatenya.</div></div>
+        </div>
+      </div>
       ` : ""}
       <div class="section-title" style="margin-top:20px">Daftar Resep</div>
       <div id="pjList"></div>`;
+    await isiSelectPegawai('pj_dokterId');
+    await isiSelectPoliFavorit('pj_poliFavorit');
+    renderKeranjangResep();
+    if (bolehKelola) {
+      await isiSelectPegawaiPolos('tplDokterId', '-- Pilih Dokter --');
+      await isiSelectPoliFavorit('tplPoliKode', '-- Pilih Poli --');
+    }
     const resepRows = await api('farmasi.listResep', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
     if(bolehKelola) await muatObatKadaluarsa();
@@ -3751,6 +3819,148 @@ async function muatObatKadaluarsa(){
       <td>${new Date(x.tanggalKadaluarsa).toLocaleDateString('id-ID')}</td>
       <td><span class="badge ${x.status==='Kadaluarsa'?'danger':'warn'}">${x.status}</span></td></tr>`).join("")}
   </table>`;
+}
+// ===== Keranjang Resep (multi-item) & Obat Favorit (template per dokter/poli) =====
+let resepCart = [];
+function namaObatDariKode(kode){
+  const o = (window.__obatRowsCache||[]).find(x=>x.kode===kode);
+  return o ? o.namaObat : kode;
+}
+function tambahKeKeranjangResep(){
+  const kode = val('pj_kode');
+  if(!kode){ toast('Pilih obat dulu'); return; }
+  resepCart.push({kode, nama: namaObatDariKode(kode), jumlah: Number(val('pj_jumlah'))||1, aturanPakai: val('pj_aturan')});
+  renderKeranjangResep();
+  document.getElementById('pj_kode').value = '';
+  document.getElementById('pj_jumlah').value = '1';
+  document.getElementById('pj_aturan').value = '';
+}
+function hapusDariKeranjangResep(idx){
+  resepCart.splice(idx, 1);
+  renderKeranjangResep();
+}
+function renderKeranjangResep(){
+  const el = document.getElementById('keranjangResep');
+  if(!el) return;
+  if(!resepCart.length){ el.innerHTML = `<div class="hint">Keranjang resep masih kosong — tambahkan obat dari daftar Favorit di atas atau dari dropdown "Obat".</div>`; return; }
+  el.innerHTML = `<table><tr><th>Obat</th><th>Jumlah</th><th>Aturan Pakai</th><th></th></tr>
+    ${resepCart.map((it,i)=>`<tr><td>${it.nama}</td><td>${it.jumlah}</td><td>${it.aturanPakai||"-"}</td><td><button class="btn sm danger" onclick="hapusDariKeranjangResep(${i})">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+async function muatObatFavoritQuickPick(){
+  const el = document.getElementById('obatFavoritQuickPick');
+  if(!el) return;
+  const dokter = pegawaiPayload('pj_dokterId','pj_dokterManual');
+  const kodePoli = val('pj_poliFavorit');
+  if(!dokter.id && !kodePoli){
+    el.innerHTML = `<div class="hint">Pilih dokter dari daftar pegawai dan/atau Poli di atas untuk lihat rekomendasi obat favoritnya.</div>`;
+    window.__favoritQuickPickRows = [];
+    return;
+  }
+  el.innerHTML = `<div class="hint">Memuat rekomendasi...</div>`;
+  const payload = {};
+  if(dokter.id) payload.pegawaiId = dokter.id;
+  if(kodePoli) payload.kodePoli = kodePoli;
+  const rows = await api('obatFavorit.list', payload, 'POST');
+  window.__favoritQuickPickRows = rows || [];
+  if(!rows.length){
+    el.innerHTML = `<div class="hint">Belum ada obat favorit tersimpan untuk dokter/Poli ini — pencarian obat biasa di bawah tetap bisa dipakai seperti biasa. (Kelola template obat di bagian bawah halaman ini.)</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+    ${rows.map((r,i)=>`<button type="button" class="btn sm ghost" onclick="tambahFavoritKeKeranjangByIndex(${i})">${r.sumber==='poli'?'🏥':'⭐'} ${(r.namaObat||"").replace(/</g,"&lt;")}${r.catatanDosis?(" — "+(r.catatanDosis||"").replace(/</g,"&lt;")):""}</button>`).join("")}
+  </div>`;
+}
+function tambahFavoritKeKeranjangByIndex(i){
+  const r = (window.__favoritQuickPickRows||[])[i];
+  if(!r) return;
+  resepCart.push({kode:r.kodeObat, nama:r.namaObat, jumlah:1, aturanPakai:r.catatanDosis||''});
+  renderKeranjangResep();
+  toast(`${r.namaObat} ditambahkan ke keranjang resep`);
+}
+function namaDariSelectPegawai(selectId){
+  const sel = document.getElementById(selectId);
+  if(!sel || !sel.value || sel.value==='__manual__') return '';
+  const opt = sel.options[sel.selectedIndex];
+  return opt ? opt.textContent.split(' — ')[0] : '';
+}
+async function submitResepDariKeranjang(){
+  if(!resepCart.length){ toast('Keranjang resep masih kosong — tambahkan minimal satu obat dulu'); return; }
+  const dokter = pegawaiPayload('pj_dokterId','pj_dokterManual');
+  const payload = {
+    noRm: val('pj_norm'), namaPasien: val('pj_nama'), petugas: state.user.nama,
+    items: resepCart.map(it=>({kode:it.kode, jumlah:it.jumlah, aturanPakai:it.aturanPakai}))
+  };
+  if(dokter.id){ payload.dokterId = dokter.id; payload.dokter = namaDariSelectPegawai('pj_dokterId'); }
+  else if(dokter.nama){ payload.dokter = dokter.nama; }
+  const r = await api('farmasi.buatResep', payload, 'POST');
+  if(r && (r.id || r.ok)){
+    if(r.adaPeringatanAlergi && (r.peringatanAlergi||[]).length){
+      toast('⚠️ Resep tersimpan, TAPI berpotensi cocok dengan riwayat alergi pasien: ' + r.peringatanAlergi.join('; '));
+    } else {
+      toast(`Resep tersimpan (${resepCart.length} item)`);
+    }
+    resepCart = [];
+  } else {
+    toast((r && (r.msg || r.error)) || 'Gagal menyimpan resep');
+  }
+  renderPenunjangTab('farmasi');
+}
+// ---- Kelola Template Obat per Dokter ----
+async function muatTemplateDokter(){
+  const box = document.getElementById('tplDokterList');
+  const pegawaiId = val('tplDokterId');
+  if(!box) return;
+  if(!pegawaiId){ box.innerHTML = `<div class="hint">Pilih dokter di atas untuk lihat/kelola templatenya.</div>`; return; }
+  box.innerHTML = `<div class="hint">Memuat...</div>`;
+  const rows = await api('obatFavorit.list', {pegawaiId}, 'POST');
+  if(!rows.length){ box.innerHTML = `<div class="hint">Dokter ini belum punya obat favorit — tambahkan lewat form di atas.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>Catatan Dosis</th><th></th></tr>
+    ${rows.map(r=>`<tr><td>${r.namaObat}</td><td>${r.catatanDosis||"-"}</td><td><button class="btn sm danger" onclick="hapusTemplateDokter('${r.favoritId}')">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+async function submitTambahTemplateDokter(){
+  const pegawaiId = val('tplDokterId');
+  const kodeObat = val('tplDokterObat');
+  if(!pegawaiId){ toast('Pilih dokter dulu'); return; }
+  if(!kodeObat){ toast('Pilih obat dulu'); return; }
+  const r = await api('obatFavorit.tambah', {pegawaiId, kodeObat, catatanDosis: val('tplDokterCatatan')}, 'POST');
+  if(r.ok){ toast('Ditambahkan ke template dokter'); document.getElementById('tplDokterCatatan').value=''; muatTemplateDokter(); }
+  else toast(r.msg || 'Gagal menambah template');
+}
+async function hapusTemplateDokter(id){
+  if(!confirm('Hapus obat ini dari template dokter?')) return;
+  const r = await api('obatFavorit.hapus', {id}, 'POST');
+  if(r.ok){ toast('Dihapus dari template dokter'); muatTemplateDokter(); }
+  else toast(r.msg || 'Gagal menghapus');
+}
+// ---- Kelola Template Obat per Poli ----
+async function muatTemplatePoli(){
+  const box = document.getElementById('tplPoliList');
+  const kodePoli = val('tplPoliKode');
+  if(!box) return;
+  if(!kodePoli){ box.innerHTML = `<div class="hint">Pilih Poli di atas untuk lihat/kelola templatenya.</div>`; return; }
+  box.innerHTML = `<div class="hint">Memuat...</div>`;
+  const rows = await api('obatFavorit.list', {kodePoli}, 'POST');
+  if(!rows.length){ box.innerHTML = `<div class="hint">Poli ini belum punya obat favorit — tambahkan lewat form di atas.</div>`; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>Catatan Dosis</th><th></th></tr>
+    ${rows.map(r=>`<tr><td>${r.namaObat}</td><td>${r.catatanDosis||"-"}</td><td><button class="btn sm danger" onclick="hapusTemplatePoli('${r.favoritId}')">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+async function submitTambahTemplatePoli(){
+  const kodePoli = val('tplPoliKode');
+  const kodeObat = val('tplPoliObat');
+  if(!kodePoli){ toast('Pilih Poli dulu'); return; }
+  if(!kodeObat){ toast('Pilih obat dulu'); return; }
+  const r = await api('obatFavoritPoli.tambah', {kodePoli, kodeObat, catatanDosis: val('tplPoliCatatan')}, 'POST');
+  if(r.ok){ toast('Ditambahkan ke template Poli'); document.getElementById('tplPoliCatatan').value=''; muatTemplatePoli(); }
+  else toast(r.msg || 'Gagal menambah template');
+}
+async function hapusTemplatePoli(id){
+  if(!confirm('Hapus obat ini dari template Poli?')) return;
+  const r = await api('obatFavoritPoli.hapus', {id}, 'POST');
+  if(r.ok){ toast('Dihapus dari template Poli'); muatTemplatePoli(); }
+  else toast(r.msg || 'Gagal menghapus');
 }
 function renderResepList(rows, bolehKelola){
   if(!rows || !rows.length) return '<div class="empty">Belum ada resep</div>';
