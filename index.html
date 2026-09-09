@@ -217,7 +217,7 @@ verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penu
 const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
-  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"],
+  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
   ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"]
 };
@@ -238,6 +238,7 @@ const DAFTAR_MODUL = [
   {id:"gizi", label:"Unit Penunjang — Gizi"},
   {id:"cssd", label:"Unit Penunjang — CSSD"},
   {id:"linen", label:"Unit Penunjang — Linen"},
+  {id:"jenazah", label:"Unit Penunjang — Pemulasaraan Jenazah"},
   {id:"bhp", label:"Unit Penunjang — BHP/Alkes (stok bahan habis pakai)"},
   {id:"ranap", label:"Manajemen Tempat Tidur/Kamar"},
   {id:"tarif", label:"Master Tarif"},
@@ -2740,7 +2741,44 @@ async function pageAturanBA(el){
 // tetap melihat semua sub-unit seperti sebelumnya (tidak berubah). Staf baru
 // (role "staf") hanya melihat sub-unit yang modulnya dicentangkan admin —
 // misalnya apoteker cuma lihat tab Farmasi, bukan keenamnya.
-const PENUNJANG_TAB_LABEL = {lab:"Lab", rad:"Radiologi", farmasi:"Farmasi", gizi:"Gizi", cssd:"CSSD", linen:"Linen", bhp:"BHP/Alkes"};
+const PENUNJANG_TAB_LABEL = {lab:"Lab", rad:"Radiologi", farmasi:"Farmasi", gizi:"Gizi", cssd:"CSSD", linen:"Linen", jenazah:"Jenazah", bhp:"BHP/Alkes"};
+// Unit yang punya master tarif sendiri di tarif_layanan (kolom "unit") --
+// dipakai form order penunjang untuk menampilkan dropdown "Pilih dari Master
+// Tarif" per unit terkait. Farmasi TIDAK di sini karena harganya dari
+// farmasi_obat.harga_jual (obat sudah punya master sendiri), bukan tarif_layanan.
+const UNIT_TARIF_LAYANAN = ["lab","radiologi","gizi","cssd","linen","jenazah"];
+// Cache daftar tarif per unit (supaya tidak panggil server berkali-kali tiap
+// render ulang tab yang sama) -- dibersihkan (dihapus key-nya) kalau ada
+// perubahan di halaman Master Tarif supaya order form ikut ter-update.
+const tarifUnitCache = {};
+async function getTarifUnitCache(unit, force){
+  if(tarifUnitCache[unit] && !force) return tarifUnitCache[unit];
+  const rows = await api('tarif.listLayanan', {unit, hanyaAktif:'1'}, 'POST');
+  tarifUnitCache[unit] = Array.isArray(rows) ? rows : [];
+  return tarifUnitCache[unit];
+}
+// Isi <select> pilihan tarif master untuk satu unit + opsi "ketik manual"
+// untuk layanan yang belum ada di master (supaya order tetap bisa dibuat,
+// sama seperti pola dropdown Pegawai di atas).
+async function isiSelectTarifUnit(selectId, unit){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const list = await getTarifUnitCache(unit);
+  sel.innerHTML = `<option value="">✍️ Ketik manual (belum ada di Master Tarif)</option>` +
+    list.map(t=>`<option value="${t.Kode_Layanan}" data-harga="${t.Tarif}" data-nama="${(t.Nama_Layanan||'').replace(/"/g,'&quot;')}">${t.Nama_Layanan} — Rp ${Number(t.Tarif||0).toLocaleString('id-ID')}</option>`).join("");
+}
+// Dipanggil saat pilihan tarif master berubah -- isi otomatis kolom nama
+// layanan + harga (tetap boleh diedit manual kalau memilih "Ketik manual").
+function onTarifUnitChange(selectId, namaId, hargaId){
+  const sel = document.getElementById(selectId);
+  const namaEl = namaId ? document.getElementById(namaId) : null;
+  const hargaEl = hargaId ? document.getElementById(hargaId) : null;
+  if(!sel) return;
+  const opt = sel.selectedOptions[0];
+  const manual = !sel.value;
+  if(namaEl){ namaEl.readOnly = !manual; namaEl.style.background = manual ? "" : "#f5f5f5"; if(!manual) namaEl.value = opt.dataset.nama || ""; }
+  if(hargaEl){ hargaEl.readOnly = !manual; hargaEl.style.background = manual ? "" : "#f5f5f5"; if(!manual) hargaEl.value = opt.dataset.harga || 0; }
+}
 function penunjangTabsAllowed(){
   const semua = Object.keys(PENUNJANG_TAB_LABEL);
   if(!state.user) return [];
@@ -2765,21 +2803,28 @@ async function renderPenunjangTab(tab){
   if (tab === 'lab' || tab === 'rad') {
     const bolehIsiHasil = state.user.role === 'admin' || (state.user.modul||[]).includes(tab);
     const label = tab === 'lab' ? 'Lab' : 'Radiologi';
+    const unitTarif = tab === 'lab' ? 'lab' : 'radiologi';
     body.innerHTML = `
       <div class="section-title">Buat Order ${label} Baru</div>
       <div style="position:relative;"><label>No. RM</label>
-        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{unitAsalId:'pj_unit'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{unitAsalId:'pj_unit'})">
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{unitAsalId:'pj_unit',dokterSelectId:'pj_dokterId',dokterManualId:'pj_dokterManual'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{unitAsalId:'pj_unit',dokterSelectId:'pj_dokterId',dokterManualId:'pj_dokterManual'})">
         <div id="pj_saranPasien" class="suggest-box"></div>
       </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Unit Asal</label><input id="pj_unit" placeholder="Terisi otomatis dari lokasi pasien saat ini — boleh diubah kalau perlu">
-      <label>Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="${tab==='lab'?'Darah Rutin, dll':'Rontgen Thorax, dll'}">
-      <label>Dokter Pengirim</label><input id="pj_dokter">
-      <label>Harga (Rp)</label><input id="pj_harga" type="number">
-      <button class="btn" onclick="pjSubmit('${tab}.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),unitAsal:val('pj_unit'),jenisPemeriksaan:val('pj_jenis'),dokterPengirim:val('pj_dokter'),harga:Number(val('pj_harga'))||0,petugas:state.user.nama})">Simpan Order ${label}</button>
+      <label>Pilih dari Master Tarif ${label} (opsional)</label>
+      <select id="pj_kodeTarif" onchange="onTarifUnitChange('pj_kodeTarif','pj_jenis','pj_harga')"><option value="">Memuat daftar tarif...</option></select>
+      <label style="margin-top:8px">Jenis Pemeriksaan</label><input id="pj_jenis" placeholder="${tab==='lab'?'Darah Rutin, dll':'Rontgen Thorax, dll'}">
+      <label>Dokter Pengirim</label>
+      <select id="pj_dokterId" onchange="onPegawaiSelectChange('pj_dokterId','pj_dokterManual')"><option value="">Memuat daftar pegawai...</option></select>
+      <input id="pj_dokterManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter pengirim manual (mis. dokter rujukan luar RS)">
+      <label>Harga (Rp) ${'<span class="hint">— otomatis terisi kalau pilih dari Master Tarif, atau isi manual kalau ketik jenis pemeriksaan sendiri</span>'}</label><input id="pj_harga" type="number">
+      <button class="btn" onclick="pjSubmitPenunjangDenganTarif('${tab}.buatOrder','pj_dokterId','pj_dokterManual',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisPemeriksaan:val('pj_jenis'),harga:Number(val('pj_harga'))||0,petugas:state.user.nama})">Simpan Order ${label}</button>
       ${!bolehIsiHasil ? `<p class="hint">Akun Anda tidak punya modul "${label}" — hanya bisa membuat order, tidak bisa mengisi hasil. Isi hasil dilakukan oleh petugas ${label.toLowerCase()} sungguhan.</p>` : ""}
       <div class="section-title" style="margin-top:16px">Daftar Order ${label}</div>
       <div id="pjList"></div>`;
+    await isiSelectTarifUnit('pj_kodeTarif', unitTarif);
+    await isiSelectPegawai('pj_dokterId');
     const rows = await api(tab+'.listOrder', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderOrderList(rows, tab, bolehIsiHasil);
   } else if (tab === 'farmasi') {
@@ -2809,6 +2854,7 @@ async function renderPenunjangTab(tab){
           <div class="row" style="margin-top:6px"><input id="obatStokAwal" type="number" placeholder="Stok awal"><input id="obatStokMin" type="number" placeholder="Stok minimal"></div>
           <input id="obatSatuan" placeholder="Satuan (tablet/kapsul/botol)" style="margin-top:6px">
           <input id="obatNamaGenerik" placeholder="Nama generik/kandungan (cth: Amoxicillin, Golongan Penisilin) — bantu cek alergi otomatis" style="margin-top:6px">
+          <input id="obatHargaJual" type="number" placeholder="Harga jual per satuan (Rp) — dipakai auto-tagih ke Billing saat obat diserahkan" style="margin-top:6px">
           <label style="margin-top:8px"><input type="checkbox" id="obatHighAlert"> ⚠️ Obat High-Alert / perlu diwaspadai (SKP 3)</label>
           <input id="obatKategoriHighAlert" placeholder="Kategori (cth: Elektrolit Pekat, Sitostatika, LASA)" style="margin-top:6px">
           <input id="obatPasanganLasa" placeholder="Mirip/rupa-ucapan dengan obat (LASA), cth: mirip Hydralazine" style="margin-top:6px">
@@ -2823,7 +2869,7 @@ async function renderPenunjangTab(tab){
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahStok()">Tambah Stok</button>
         </div>
       </div>
-      <div style="margin-top:10px">${pjTableObat(obatRows)}</div>
+      <div style="margin-top:10px">${pjTableObat(obatRows, bolehKelola)}</div>
       <div class="section-title" style="margin-top:20px">⏰ Obat Mendekati/Sudah Kadaluarsa</div>
       <div class="row">
         <div><label>Ambang Hari (tampilkan yang kadaluarsa dalam N hari)</label><input id="obatAmbangHari" type="number" value="90"></div>
@@ -2840,40 +2886,98 @@ async function renderPenunjangTab(tab){
     const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
       <div style="position:relative;"><label>No. RM</label>
-        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang'})">
+        <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang', dokterSelectId:'pj_dokterId', dokterManualId:'pj_dokterManual'})" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint',{alergiId:'pj_alergi', ruangId:'pj_ruang', dokterSelectId:'pj_dokterId', dokterManualId:'pj_dokterManual'})">
         <div id="pj_saranPasien" class="suggest-box"></div>
       </div>
       <label>Nama Pasien</label><input id="pj_nama"><div id="pj_namaHint" class="hint"></div>
       <label>Ruang/Kelas</label><input id="pj_ruang" placeholder="Terisi otomatis kalau pasien sedang rawat inap, atau isi manual">
-      <label>Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
+      <label>Pilih dari Master Tarif Gizi (opsional)</label>
+      <select id="pj_kodeTarif" onchange="onTarifUnitChange('pj_kodeTarif','pj_jenis','pj_harga')"><option value="">Memuat daftar tarif...</option></select>
+      <label style="margin-top:8px">Jenis Diet</label><input id="pj_jenis" placeholder="Diet DM, dll">
+      <label>Dokter (pengorder diet)</label>
+      <select id="pj_dokterId" onchange="onPegawaiSelectChange('pj_dokterId','pj_dokterManual')"><option value="">Memuat daftar pegawai...</option></select>
+      <input id="pj_dokterManual" style="display:none;margin-top:6px" placeholder="Ketik nama dokter manual">
+      <label>Harga (Rp)</label><input id="pj_harga" type="number">
       <label>Alergi/Pantangan</label><input id="pj_alergi" placeholder="Terisi otomatis dari data pasien kalau ditemukan">
-      <button class="btn" onclick="pjSubmit('gizi.buatOrder',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama})">Simpan Order Diet</button>
+      <button class="btn" onclick="pjSubmitPenunjangDenganTarif('gizi.buatOrder','pj_dokterId','pj_dokterManual',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),kodeTarif:val('pj_kodeTarif')||undefined,jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama},'dokterId','dokter')">Simpan Order Diet</button>
       <div class="section-title" style="margin-top:16px">Daftar Order Gizi</div>
       <div id="pjList"></div>`;
+    await isiSelectTarifUnit('pj_kodeTarif', 'gizi');
+    await isiSelectPegawai('pj_dokterId');
     const rows = await api('gizi.listAktif', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderGiziList(rows, bolehProsesGizi);
   } else if (tab === 'cssd') {
     const bolehProsesCssd = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('cssd');
     body.innerHTML = `
+      <label>No. RM (opsional — isi hanya kalau biaya ini dibebankan ke pasien tertentu)</label>
+      <input id="pj_norm" placeholder="Kosongkan kalau ini stok/proses umum ruangan, bukan biaya per-pasien">
       <label>Unit Asal</label><input id="pj_unit">
-      <label>Jenis Alat/Set</label><input id="pj_jenis">
-      <label>Jumlah</label><input id="pj_jumlah" type="number">
-      <button class="btn" onclick="pjSubmit('cssd.terimaAlat',{unitAsal:val('pj_unit'),jenisAlat:val('pj_jenis'),jumlah:Number(val('pj_jumlah'))||1,petugas:state.user.nama})">Simpan</button>
+      <label>Pilih dari Master Tarif CSSD (opsional)</label>
+      <select id="pj_kodeTarif" onchange="onTarifUnitChange('pj_kodeTarif','pj_jenis',null)"><option value="">Memuat daftar tarif...</option></select>
+      <label style="margin-top:8px">Jenis Alat/Set</label><input id="pj_jenis">
+      <label>Jumlah</label><input id="pj_jumlah" type="number" value="1">
+      <button class="btn" onclick="pjSubmit('cssd.terimaAlat',{noRm:val('pj_norm')||undefined,unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisAlat:val('pj_jenis'),jumlah:Number(val('pj_jumlah'))||1,petugas:state.user.nama})">Simpan</button>
+      <p class="hint">Biaya CSSD hanya otomatis masuk Billing kalau No. RM diisi DAN cocok dengan kunjungan aktif pasien tsb.</p>
       <div class="section-title" style="margin-top:16px">Daftar Alat CSSD</div>
       <div id="pjList"></div>`;
+    await isiSelectTarifUnit('pj_kodeTarif', 'cssd');
     const rows = await api('cssd.listAktif', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderCssdList(rows, bolehProsesCssd);
   } else if (tab === 'linen') {
     const bolehProsesLinen = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('linen');
     body.innerHTML = `
+      <label>No. RM (opsional — isi hanya kalau biaya ini dibebankan ke pasien tertentu)</label>
+      <input id="pj_norm" placeholder="Kosongkan kalau ini stok/proses umum ruangan, bukan biaya per-pasien">
       <label>Unit Asal</label><input id="pj_unit">
-      <label>Jenis Linen</label><input id="pj_jenis">
+      <label>Pilih dari Master Tarif Linen (opsional)</label>
+      <select id="pj_kodeTarif" onchange="onTarifUnitChange('pj_kodeTarif','pj_jenis',null)"><option value="">Memuat daftar tarif...</option></select>
+      <label style="margin-top:8px">Jenis Linen</label><input id="pj_jenis">
       <label>Jumlah Kotor</label><input id="pj_jumlah" type="number">
-      <button class="btn" onclick="pjSubmit('linen.setorKotor',{unitAsal:val('pj_unit'),jenisLinen:val('pj_jenis'),jumlahKotor:Number(val('pj_jumlah'))||0,petugas:state.user.nama})">Simpan</button>
+      <button class="btn" onclick="pjSubmit('linen.setorKotor',{noRm:val('pj_norm')||undefined,unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisLinen:val('pj_jenis'),jumlahKotor:Number(val('pj_jumlah'))||0,petugas:state.user.nama})">Simpan</button>
+      <p class="hint">Biaya Linen hanya otomatis masuk Billing kalau No. RM diisi DAN cocok dengan kunjungan aktif pasien tsb.</p>
       <div class="section-title" style="margin-top:16px">Daftar Linen Diproses</div>
       <div id="pjList"></div>`;
+    await isiSelectTarifUnit('pj_kodeTarif', 'linen');
     const rows = await api('linen.listProses', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderLinenList(rows, bolehProsesLinen);
+  } else if (tab === 'jenazah') {
+    const bolehProsesJenazah = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('jenazah');
+    const tarifJenazah = await getTarifUnitCache('jenazah', true);
+    body.innerHTML = `
+      <h1 style="font-size:18px;margin:0 0 4px">⚱️ Pemulasaraan Jenazah</h1>
+      <p class="sub">Pelacakan status: Menunggu → Diproses → Selesai → Diambil Keluarga. Setiap layanan yang dicentang otomatis dihitung tarifnya dari Master Tarif &amp; masuk ke Billing kunjungan pasien (kalau No. RM ditemukan).</p>
+      ${bolehProsesJenazah ? `
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-title">Catat Kasus Baru</div>
+        <div style="position:relative;"><label>No. RM (opsional)</label>
+          <input id="jz_norm" placeholder="Ketik No. RM kalau pasien sudah terdaftar di SIMRS..." autocomplete="off" oninput="cariPasienSaran('jz_norm','jz_saranPasien','jz_nama','jz_namaHint')" onblur="cariPasienOtomatis('jz_norm','jz_nama','jz_namaHint')">
+          <div id="jz_saranPasien" class="suggest-box"></div>
+        </div>
+        <label>Nama Pasien</label><input id="jz_nama">
+        <div class="row">
+          <div><label>Tanggal/Jam Meninggal</label><input id="jz_tglMeninggal" type="datetime-local"></div>
+          <div><label>Ruang Asal</label><input id="jz_ruang" placeholder="cth: ICU, IGD"></div>
+        </div>
+        <div class="row">
+          <div><label>Keluarga Penanggung Jawab</label><input id="jz_keluarga"></div>
+          <div><label>Kontak Keluarga</label><input id="jz_kontak" placeholder="No. HP"></div>
+        </div>
+        <label>Layanan (centang yang dipakai — harga otomatis dari Master Tarif Jenazah)</label>
+        <div id="jz_itemList" style="border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:4px">
+          ${tarifJenazah.length ? tarifJenazah.map(t=>`
+            <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-weight:normal">
+              <input type="checkbox" class="jz_item_chk" value="${t.Kode_Layanan}" data-harga="${t.Tarif}">
+              ${t.Nama_Layanan} — Rp ${Number(t.Tarif||0).toLocaleString('id-ID')}
+              <span>Qty: <input type="number" class="jz_item_qty" data-kode="${t.Kode_Layanan}" value="1" style="width:60px;display:inline-block"></span>
+            </label>`).join("") : `<span class="hint">Belum ada tarif untuk unit Jenazah — tambahkan dulu di menu Master Tarif &gt; tab Pemulasaraan Jenazah.</span>`}
+        </div>
+        <label style="margin-top:8px">Catatan (opsional)</label><textarea id="jz_catatan"></textarea>
+        <button class="btn" style="margin-top:8px" onclick="submitJenazahBaru()">Simpan Kasus</button>
+      </div>` : `<p class="hint">Akun Anda tidak punya modul "Pemulasaraan Jenazah" — hanya bisa melihat daftar, tidak bisa mencatat kasus baru.</p>`}
+      <div class="section-title">Daftar Kasus</div>
+      <div id="pjList"></div>`;
+    const rows = await api('jenazah.list', {}, 'POST');
+    document.getElementById('pjList').innerHTML = renderJenazahList(rows, bolehProsesJenazah);
   } else if (tab === 'bhp') {
     const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('bhp');
     const bhpRows = await api('bhp.list', {}, 'POST');
@@ -2994,6 +3098,53 @@ async function linenTandaiBersih(id){
   const jumlahBersih = Number(val('linenBersih_'+id))||0;
   const r = await api('linen.setBersih', {id, jumlahBersih, petugas: state.user.nama}, 'POST');
   if(r.ok){ toast('Ditandai bersih & dikembalikan'); renderPenunjangTab('linen'); } else toast(r.msg || 'Gagal menyimpan');
+}
+
+/* ===== Pemulasaraan Jenazah: catat kasus baru (multi-item tarif) + pelacakan status bertahap ===== */
+async function submitJenazahBaru(){
+  const items = Array.from(document.querySelectorAll('.jz_item_chk')).filter(c=>c.checked).map(c=>({
+    kodeTarif: c.value,
+    qty: Number(document.querySelector(`.jz_item_qty[data-kode="${c.value}"]`).value) || 1
+  }));
+  if(!val('jz_nama')){ toast('Nama pasien wajib diisi'); return; }
+  const r = await api('jenazah.buat', {
+    noRm: val('jz_norm'), namaPasien: val('jz_nama'), tanggalMeninggal: val('jz_tglMeninggal') ? new Date(val('jz_tglMeninggal')).toISOString() : undefined,
+    ruangAsal: val('jz_ruang'), keluargaPenanggungjawab: val('jz_keluarga'), kontakKeluarga: val('jz_kontak'),
+    catatan: val('jz_catatan'), petugas: state.user.nama, items
+  }, 'POST');
+  if(r.ok){
+    toast(r.peringatan ? ('⚠️ '+r.peringatan) : 'Kasus jenazah tersimpan');
+    renderPenunjangTab('jenazah');
+  } else toast(r.msg || 'Gagal menyimpan');
+}
+function renderJenazahList(rows, bolehProses){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada kasus pemulasaraan jenazah</div>';
+  const langkahBerikut = {'Menunggu':'Diproses', 'Diproses':'Selesai', 'Selesai':'Diambil Keluarga'};
+  const badgeCls = {'Menunggu':'muted','Diproses':'warn','Selesai':'ok','Diambil Keluarga':'ok'};
+  return rows.map(r => `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>${r.namaPasien||"-"}</b>${r.noRm ? ` (${r.noRm})` : ""} — ${r.ruangAsal||"-"}</div>
+        <span class="badge ${badgeCls[r.status]||'muted'}">${r.status}</span>
+      </div>
+      <div class="hint" style="margin-top:4px">
+        Keluarga: ${r.keluargaPenanggungjawab||"-"} (${r.kontakKeluarga||"-"})
+        ${r.tanggalMeninggal ? ` · Meninggal: ${new Date(r.tanggalMeninggal).toLocaleString('id-ID')}` : ""}
+      </div>
+      ${(r.items||[]).length ? `<div class="hint" style="margin-top:4px">Layanan: ${r.items.map(i=>`${i.namaLayanan} (Rp ${Number(i.harga||0).toLocaleString('id-ID')} x ${i.qty})`).join(', ')} — Total: Rp ${Number(r.totalTagihan||0).toLocaleString('id-ID')}</div>` : ""}
+      ${r.catatan ? `<div class="hint" style="margin-top:4px">Catatan: ${r.catatan}</div>` : ""}
+      ${r.status==='Diambil Keluarga'
+        ? `<div class="hint" style="margin-top:6px">Diserahterimakan oleh ${r.petugasSerahTerima||"-"}, ${r.waktuDiambil ? new Date(r.waktuDiambil).toLocaleString('id-ID') : "-"}</div>`
+        : (bolehProses && langkahBerikut[r.status])
+          ? `${langkahBerikut[r.status]==='Diambil Keluarga' ? `<input id="jzPetugasServis_${r.id}" placeholder="Nama petugas serah terima" style="margin-top:6px">` : ""}
+             <button class="btn sm" style="margin-top:6px" onclick="jenazahLanjutStatus('${r.id}','${langkahBerikut[r.status]}')">➡️ Tandai ${langkahBerikut[r.status]}</button>`
+          : ""}
+    </div>`).join("");
+}
+async function jenazahLanjutStatus(id, statusBaru){
+  const petugasEl = document.getElementById('jzPetugasServis_'+id);
+  const r = await api('jenazah.updateStatus', {id, statusBaru, petugas: petugasEl ? petugasEl.value : state.user.nama}, 'POST');
+  if(r.ok){ toast('Status diperbarui: '+statusBaru); renderPenunjangTab('jenazah'); } else toast(r.msg || 'Gagal memperbarui status');
 }
 
 /* ================== MANAJEMEN TEMPAT TIDUR / KAMAR ================== */
@@ -3171,6 +3322,21 @@ async function cariPasienOtomatis(rmId, namaId, hintId, opt){
         pesan += " — Unit Asal otomatis: " + hasil.unitAsalSaran;
       }
     }
+    // BARU: saran otomatis "Dokter Pengirim/Order" dari DPJP kunjungan aktif
+    // pasien -- tetap boleh diganti manual (pilih "Lainnya" di dropdown)
+    // kalau dokter pengirim beda dari DPJP, atau dokter rujukan luar RS.
+    if(opt.dokterSelectId){
+      const dokterSel = document.getElementById(opt.dokterSelectId);
+      if(dokterSel){
+        await isiSelectPegawai(opt.dokterSelectId);
+        if(hasil.dpjpId){
+          dokterSel.value = hasil.dpjpId;
+          if(dokterSel.value !== hasil.dpjpId){ dokterSel.value = "__manual__"; }
+          if(opt.dokterManualId) onPegawaiSelectChange(opt.dokterSelectId, opt.dokterManualId);
+          pesan += " — Dokter otomatis: " + (hasil.dpjpNama || "(DPJP kunjungan aktif)");
+        }
+      }
+    }
     if(hintEl) hintEl.textContent = pesan;
   } else {
     if(namaEl){ namaEl.value = ""; namaEl.readOnly = false; namaEl.style.background = ""; }
@@ -3178,17 +3344,37 @@ async function cariPasienOtomatis(rmId, namaId, hintId, opt){
     if(hintEl) hintEl.textContent = rm.length >= 2 ? "⚠️ No. RM tidak ditemukan — pastikan sudah benar, atau daftarkan pasien dulu di menu Pendaftaran" : "";
   }
 }
+// Helper untuk form yang punya pilihan "Master Tarif" + pilihan dokter dari
+// master pegawai (Lab/Radiologi/Gizi) -- menggabungkan hasil pilihan
+// dropdown dokter (ID dari master ATAU nama ketik manual) ke payload sebelum
+// dikirim, lalu memanggil pjSubmit seperti biasa. dokterIdField/dokterNamaField
+// dibuat bisa diganti karena nama field beda antar unit (fn_lab_insert/
+// fn_rad_insert pakai dokterPengirimId/dokterPengirim, fn_gizi_insert pakai
+// dokterId/dokter).
+async function pjSubmitPenunjangDenganTarif(action, dokterSelectId, dokterManualId, data, dokterIdField, dokterNamaField){
+  dokterIdField = dokterIdField || 'dokterPengirimId';
+  dokterNamaField = dokterNamaField || 'dokterPengirim';
+  if (dokterSelectId) {
+    const dokter = pegawaiPayload(dokterSelectId, dokterManualId);
+    if (dokter.id) data[dokterIdField] = dokter.id;
+    if (dokter.nama) data[dokterNamaField] = dokter.nama;
+  }
+  if (!data.kodeTarif) delete data.kodeTarif;
+  await pjSubmit(action, data);
+}
 async function pjSubmit(action, data){
   const r = await api(action, data, 'POST');
   if (r && (r.id || r.ok)) {
     if (r.adaPeringatanAlergi && (r.peringatanAlergi||[]).length){
       toast('⚠️ Resep tersimpan, TAPI berpotensi cocok dengan riwayat alergi pasien: ' + r.peringatanAlergi.join('; '));
+    } else if (r.peringatan) {
+      toast('⚠️ ' + r.peringatan);
     } else {
-      toast('Tersimpan');
+      toast('Tersimpan' + (r.billingTerbuat ? ' — baris Billing otomatis ikut dibuat' : ''));
     }
   }
-  else { toast((r && r.error) || 'Gagal menyimpan'); }
-  const tabMap = { 'lab.buatOrder':'lab','rad.buatOrder':'rad','farmasi.buatResep':'farmasi','gizi.buatOrder':'gizi','cssd.terimaAlat':'cssd','linen.setorKotor':'linen' };
+  else { toast((r && (r.msg || r.error)) || 'Gagal menyimpan'); }
+  const tabMap = { 'lab.buatOrder':'lab','rad.buatOrder':'rad','farmasi.buatResep':'farmasi','gizi.buatOrder':'gizi','cssd.terimaAlat':'cssd','linen.setorKotor':'linen','jenazah.buat':'jenazah' };
   renderPenunjangTab(tabMap[action] || 'lab');
 }
 
@@ -3260,17 +3446,23 @@ async function isiHasilPemeriksaan(jenis, orderId){
 }
 
 /* ===== Farmasi: master obat & verifikasi resep ===== */
-function pjTableObat(rows){
+function pjTableObat(rows, bolehEditHarga){
   if(!rows || !rows.length) return '<div class="empty">Belum ada obat di master</div>';
-  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>High-Alert</th></tr>
+  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Jual (Rp)</th><th>High-Alert</th></tr>
     ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}><td>${o.kode}</td><td>${o.namaObat}</td><td class="hint">${o.namaGenerik||"-"}</td><td>${o.stok}</td><td>${o.stokMinimal}</td><td>${o.satuan||"-"}</td>
+      <td>${bolehEditHarga ? `<div style="display:flex;gap:4px"><input id="obatHarga_${o.kode}" type="number" value="${o.hargaJual||0}" style="width:90px"><button class="btn sm" onclick="submitSetHargaObat('${o.kode}')">Simpan</button></div>` : `Rp ${Number(o.hargaJual||0).toLocaleString('id-ID')}`}${!o.hargaJual ? `<div class="hint" style="color:var(--red)">Belum diisi — obat ini belum bisa tertagih otomatis ke Billing</div>` : ""}</td>
       <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td></tr>`).join("")}
   </table>`;
+}
+async function submitSetHargaObat(kode){
+  const harga = Number(val('obatHarga_'+kode)) || 0;
+  const r = await api('farmasi.setHarga', {kode, hargaJual: harga}, 'POST');
+  if(r.ok){ toast('Harga obat disimpan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan harga');
 }
 async function submitTambahObatBaru(){
   const r = await api('farmasi.tambahObatBaru', {
     kode:val('obatKodeBaru'), namaObat:val('obatNamaBaru'), stokAwal:Number(val('obatStokAwal'))||0, stokMinimal:Number(val('obatStokMin'))||0, satuan:val('obatSatuan'),
-    namaGenerik: val('obatNamaGenerik'),
+    namaGenerik: val('obatNamaGenerik'), hargaJual: Number(val('obatHargaJual'))||0,
     isHighAlert: document.getElementById('obatHighAlert').checked,
     kategoriHighAlert: val('obatKategoriHighAlert'), pasanganLasa: val('obatPasanganLasa')
   }, 'POST');
@@ -3593,17 +3785,27 @@ async function simpanPengaturanReasesmen(kunci){
 }
 
 /* ================== MASTER TARIF ================== */
+// Unit penunjang yang punya tab tarif sendiri (kode unit -> label tombol).
+// "lainnya" tetap ada untuk tarif umum yang tidak masuk unit spesifik mana
+// pun (mis. Ambulans, Tindakan Umum) -- perilaku LAMA sebelum fitur per-unit
+// ini tetap bisa dipakai lewat tab ini.
+const TARIF_UNIT_LABEL = {lab:"Lab", radiologi:"Radiologi", gizi:"Gizi", cssd:"CSSD", linen:"Linen", jenazah:"Pemulasaraan Jenazah", lainnya:"Lainnya"};
 async function pageTarif(el){
-  el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, Layanan Lain</p>
+  el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, &amp; Tarif Layanan Penunjang per unit (Lab/Radiologi/Gizi/CSSD/Linen/Jenazah). Harga obat Farmasi dikelola di menu Unit Penunjang &gt; tab Farmasi.</p>
     <div class="card">
-      <div style="display:flex;gap:6px;margin-bottom:14px;">
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn" onclick="renderTarifTab('inap')">Rawat Inap</button>
         <button class="btn" onclick="renderTarifTab('jalan')">Rawat Jalan</button>
-        <button class="btn" onclick="renderTarifTab('layanan')">Layanan Lain</button>
+        ${Object.keys(TARIF_UNIT_LABEL).map(u=>`<button class="btn" onclick="renderTarifTab('${u}')">${TARIF_UNIT_LABEL[u]}</button>`).join("")}
+        <button class="btn ghost" onclick="bukaFarmasiDariTarif()">💊 Harga Obat Farmasi →</button>
       </div>
       <div id="tarifBody"></div>
     </div>`;
   renderTarifTab('inap');
+}
+function bukaFarmasiDariTarif(){
+  goTo('penunjang');
+  setTimeout(()=>renderPenunjangTab('farmasi'), 50);
 }
 
 async function renderTarifTab(tab){
@@ -3633,23 +3835,48 @@ async function renderTarifTab(tab){
       <div id="tfList" style="margin-top:14px"></div>`;
     const rows = await api('tarif.listRawatJalan', {}, 'POST');
     document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Poli','Nama_Poli','Tarif_Konsultasi_Umum','Tarif_Konsultasi_Spesialis']);
-  } else if (tab === 'layanan') {
+  } else if (TARIF_UNIT_LABEL[tab]) {
+    // Tab per-unit (lab/radiologi/gizi/cssd/linen/jenazah/lainnya) --
+    // semuanya memakai tarif_layanan yang sama, dibedakan lewat kolom "unit".
+    const label = TARIF_UNIT_LABEL[tab];
     body.innerHTML = `
-      <label>Kode Layanan</label><input id="tf_kode">
-      <label>Kategori</label><input id="tf_kategori" placeholder="Lab, Radiologi, Tindakan, Ambulans">
+      <div class="section-title">Tambah/Ubah Tarif ${label}</div>
+      <label>Kode Layanan</label><input id="tf_kode" placeholder="cth: ${tab.toUpperCase().slice(0,3)}001">
+      <label>Kategori (sub-kelompok, opsional)</label><input id="tf_kategori" placeholder="${tab==='lab' ? 'Darah Rutin, Kimia Darah, dll' : tab==='jenazah' ? 'Perawatan, Peti, Ambulans, dll' : 'Sub-kategori bebas'}">
       <label>Nama Layanan</label><input id="tf_nama">
-      <label>Satuan</label><input id="tf_satuan" placeholder="Per Tindakan">
+      <label>Satuan</label><input id="tf_satuan" placeholder="Per Pemeriksaan / Per Hari / Per Kasus">
       <label>Tarif (Rp)</label><input id="tf_tarif" type="number">
-      <button class="btn" onclick="tfSubmit('tarif.tambahLayanan',{kode:val('tf_kode'),kategori:val('tf_kategori'),nama:val('tf_nama'),satuan:val('tf_satuan'),tarif:Number(val('tf_tarif'))||0},'layanan')">Simpan</button>
+      <button class="btn" onclick="tfSubmit('tarif.tambahLayanan',{kode:val('tf_kode'),kategori:val('tf_kategori'),nama:val('tf_nama'),satuan:val('tf_satuan'),tarif:Number(val('tf_tarif'))||0,unit:'${tab}'},'${tab}')">Simpan</button>
+      <p class="hint">Isi Kode Layanan yang SAMA PERSIS dengan tarif yang sudah ada kalau bermaksud MENGUBAH harga tarif tsb (bukan menambah baris baru).</p>
       <div id="tfList" style="margin-top:14px"></div>`;
-    const rows = await api('tarif.listLayanan', {}, 'POST');
-    document.getElementById('tfList').innerHTML = pjTable(rows, ['Kode_Layanan','Kategori','Nama_Layanan','Tarif']);
+    const rows = await api('tarif.listLayanan', {unit: tab}, 'POST');
+    document.getElementById('tfList').innerHTML = renderTarifLayananList(rows, tab);
   }
+}
+function renderTarifLayananList(rows, tab){
+  if(!rows || !rows.length) return '<p class="sub">Belum ada tarif untuk unit ini.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kategori</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Layanan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    rows.map(r => `<tr${r.aktif===false?' style="color:var(--muted)"':''}>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kode_Layanan}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kategori||"-"}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Nama_Layanan}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp ${Number(r.Tarif||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)"><button class="btn sm ghost" onclick="tfSetAktif('${r.Kode_Layanan}',${r.aktif===false},'${tab}')">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button></td>
+    </tr>`).join("") + '</table>';
+}
+async function tfSetAktif(kode, aktifBaru, tab){
+  const r = await api('tarif.setAktifLayanan', {kode, aktif: aktifBaru}, 'POST');
+  if(r.ok){ toast(aktifBaru ? 'Tarif diaktifkan kembali' : 'Tarif dinonaktifkan — tidak akan muncul lagi di pilihan order baru'); renderTarifTab(tab); } else toast(r.msg || 'Gagal menyimpan');
 }
 
 async function tfSubmit(action, data, tab){
   const r = await api(action, data, 'POST');
-  if (r && r.ok) { toast('Tersimpan'); } else { toast((r && r.error) || 'Gagal menyimpan'); }
+  if (r && r.ok) { toast('Tersimpan'); } else { toast((r && (r.msg || r.error)) || 'Gagal menyimpan'); }
+  // Tarif diedit -> paksa muat ulang cache tarif per-unit di form order penunjang,
+  // supaya perubahan harga/aktif langsung terlihat tanpa perlu reload halaman.
+  delete tarifUnitCache[data.unit || tab];
   renderTarifTab(tab);
 }
 
