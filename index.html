@@ -1053,12 +1053,28 @@ CARA PASANG (frontend):
 // ================== PAPAN IGD (daftar pasien aktif, urut prioritas) ==================
 async function pageIGD(el){
   el.innerHTML = `<h1>IGD</h1><p class="sub">Papan pasien aktif, urut prioritas triase</p>
-    <div style="margin-bottom:12px">
-      <button class="btn" onclick="mulaiTriaseBaru()">+ Triase Pasien Baru (dari Kunjungan IGD)</button>
+    <div class="section-title">🕒 Menunggu Triase</div>
+    <p class="hint">Pasien yang sudah didaftarkan di menu Pendaftaran dengan Jenis Kunjungan = IGD, tapi belum ditriase. Klik salah satu untuk langsung membuka form Triase dengan ID kunjungan &amp; nama pasien terisi otomatis.</p>
+    <div id="menungguTriaseIGD"></div>
+    <div style="margin:12px 0">
+      <button class="btn ghost" onclick="mulaiTriaseBaru()">✍️ Isi ID Kunjungan Manual (kalau pasien tidak muncul di atas)</button>
     </div>
+    <div class="section-title">Pasien Sedang Observasi</div>
     <div id="papanIGD"></div>
     <div id="areaDetailIGD" style="margin-top:16px"></div>`;
-  await muatPapanIGD();
+  await Promise.all([muatMenungguTriaseIGD(), muatPapanIGD()]);
+}
+
+async function muatMenungguTriaseIGD(){
+  const box = document.getElementById("menungguTriaseIGD");
+  const r = await api("getKunjunganIGDBelumTriase", {}, "GET");
+  if(!r || !r.ok){ box.innerHTML = `<p class="hint">Gagal memuat daftar</p>`; return; }
+  if(!r.jumlah){ box.innerHTML = `<p class="hint">Tidak ada pasien IGD yang menunggu triase saat ini.</p>`; return; }
+  box.innerHTML = r.pasien.map(p=>`<div class="igd-card" onclick='mulaiTriaseBaru(${JSON.stringify(p.kunjunganId)}, ${JSON.stringify(p.nama)}, ${JSON.stringify(p.rm)})'>
+      <b>${p.nama}</b> <span style="color:#666">(${p.rm})</span>
+      <br><span style="font-size:13px;color:#555">${p.keluhan || '-'}</span>
+      <br><span style="font-size:12px;color:#888">Didaftarkan ${p.menitSejakDaftar} menit lalu — ${p.kunjunganId}</span>
+    </div>`).join("");
 }
 
 async function muatPapanIGD(){
@@ -1079,12 +1095,13 @@ async function muatPapanIGD(){
 }
 
 // ================== TRIASE PASIEN BARU ==================
-function mulaiTriaseBaru(){
+function mulaiTriaseBaru(kunjunganId, nama, rm){
   document.getElementById("areaDetailIGD").innerHTML = `
     <div class="card">
       <div class="section-title">Triase Pasien</div>
+      ${kunjunganId ? `<p class="hint">Pasien: <b>${nama}</b> (${rm}) — ${kunjunganId}</p>` : ""}
       <label>Kunjungan ID (dari Pendaftaran, Jenis Kunjungan = IGD)</label>
-      <input id="tKunjunganId" placeholder="cth: KJ...">
+      <input id="tKunjunganId" placeholder="cth: KJ..." value="${kunjunganId || ""}">
       <label>Tingkat Triase</label>
       <select id="tTriase">
         <option value="Merah">Merah - Gawat Darurat (immediate)</option>
@@ -1119,6 +1136,7 @@ async function submitTriase(){
   if(r.ok){
     document.getElementById("hasilTriase").innerHTML = `✅ Triase tersimpan: <b>${r.igdId}</b>`;
     toast("Triase tersimpan");
+    muatMenungguTriaseIGD();
     muatPapanIGD();
     bukaDetailIGD(r.igdId);
   } else { toast(r.msg || "Gagal menyimpan triase"); }
