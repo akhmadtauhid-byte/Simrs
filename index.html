@@ -1005,7 +1005,34 @@ function render(){
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
-  pages[state.page](holder);
+  return pages[state.page](holder);
+}
+// Sama seperti render(), tapi kalau sedang di halaman Rekam Medis, kalimat
+// "Diagnosa Klinis Dokter" yang sedang diketik & hasil "Analisa & Cari Saran
+// Kode" (ICD-10 maupun ICD-9) yang sedang tampil TIDAK ikut hilang setelah
+// render ulang — dipakai setelah Tambah/Hapus Diagnosa/Tindakan supaya staf
+// tidak perlu klik "Analisa" ulang dari nol cuma untuk lanjut menambahkan
+// tindakan yang sarannya sebenarnya sudah ketemu sebelumnya.
+async function renderPertahankanAnalisaSaran(){
+  const elTeks = document.getElementById("diagnosaMedisDokter");
+  const elSaran10 = document.getElementById("saranICD10DariDiagnosa");
+  const elSaran9 = document.getElementById("saranICD9DariDiagnosa");
+  const teksSekarang = elTeks ? elTeks.value : null;
+  const saran10Sekarang = elSaran10 ? elSaran10.innerHTML : null;
+  const saran9Sekarang = elSaran9 ? elSaran9.innerHTML : null;
+  await render();
+  if(teksSekarang !== null){
+    const elTeksBaru = document.getElementById("diagnosaMedisDokter");
+    if(elTeksBaru) elTeksBaru.value = teksSekarang;
+  }
+  if(saran10Sekarang !== null){
+    const elSaran10Baru = document.getElementById("saranICD10DariDiagnosa");
+    if(elSaran10Baru) elSaran10Baru.innerHTML = saran10Sekarang;
+  }
+  if(saran9Sekarang !== null){
+    const elSaran9Baru = document.getElementById("saranICD9DariDiagnosa");
+    if(elSaran9Baru) elSaran9Baru.innerHTML = saran9Sekarang;
+  }
 }
 /*
 ============================================================
@@ -1901,20 +1928,20 @@ async function submitPersetujuanTindakan(){
 async function submitAdmisi(){
   const dpjpPilih = pegawaiPayload("dpjpRIId","dpjpRIManual");
   const r = await api("admisiRawatInap", {kunjunganId:state.activeKunjunganId, ruangan:val("ruangan"), kelas:val("kelas"), dpjpId: dpjpPilih.id, dpjp: dpjpPilih.nama, caraMasuk:val("caraMasuk"), tempatTidurId: val("tempatTidurId")}, "POST");
-  if(r.ok){ toast(r.msg || "Pasien diadmisi rawat inap"); render(); } else { toast(r.msg || "Gagal admisi rawat inap"); }
+  if(r.ok){ toast(r.msg || "Pasien diadmisi rawat inap"); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || "Gagal admisi rawat inap"); }
 }
 async function submitPindahKamar(){
   const tempatTidurIdBaru = val("bedPindahId");
   if(!tempatTidurIdBaru){ toast("Pilih tempat tidur tujuan dulu"); return; }
   const r = await api("kamar.pindahkanPasien", {kunjunganId: state.activeKunjunganId, tempatTidurIdBaru}, "POST");
-  if(r.ok){ toast(r.msg || "Pasien dipindahkan"); render(); } else { toast(r.msg || "Gagal memindahkan pasien"); }
+  if(r.ok){ toast(r.msg || "Pasien dipindahkan"); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || "Gagal memindahkan pasien"); }
 }
 async function submitDiagnosa(){
   const editId = val("editDiagId");
   const r = editId
     ? await api("diagnosa.edit", {id: editId, jenis:val("jenisDiag"), kodeICD10:val("kodeICD10"), deskripsi:val("deskDiag")}, "POST")
     : await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
-  if(r.ok){ toast(editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"); batalEditDiagnosa(); render(); } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
+  if(r.ok){ toast(editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"); batalEditDiagnosa(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
 }
 function mulaiEditDiagnosa(x){
   document.getElementById("diagFormTitle").textContent = "Ubah Diagnosa";
@@ -1936,7 +1963,7 @@ function batalEditDiagnosa(){
 async function hapusDiagnosaRow(id){
   if(!confirm("Hapus permanen baris diagnosa ini? (tercatat di Log Audit)")) return;
   const r = await api("diagnosa.hapus", {id}, "POST");
-  if(r.ok){ toast("Diagnosa dihapus"); render(); } else toast(r.msg || "Gagal menghapus");
+  if(r.ok){ toast("Diagnosa dihapus"); await renderPertahankanAnalisaSaran(); } else toast(r.msg || "Gagal menghapus");
 }
 async function submitTindakan(){
   const pelPilih = pegawaiPayload("pelaksanaId","pelaksanaManual");
@@ -1944,7 +1971,7 @@ async function submitTindakan(){
   const r = editId
     ? await api("tindakan.edit", {id: editId, kodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST")
     : await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
-  if(r.ok){ toast(editId ? "Tindakan diperbarui" : "Tindakan ditambahkan"); batalEditTindakan(); render(); } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
+  if(r.ok){ toast(editId ? "Tindakan diperbarui" : "Tindakan ditambahkan"); batalEditTindakan(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
 }
 function mulaiEditTindakan(x){
   document.getElementById("tindakanFormTitle").textContent = "Ubah Tindakan";
@@ -1970,7 +1997,7 @@ function batalEditTindakan(){
 async function hapusTindakanRow(id){
   if(!confirm("Hapus permanen baris tindakan ini? (tercatat di Log Audit)")) return;
   const r = await api("tindakan.hapus", {id}, "POST");
-  if(r.ok){ toast("Tindakan dihapus"); render(); } else toast(r.msg || "Gagal menghapus");
+  if(r.ok){ toast("Tindakan dihapus"); await renderPertahankanAnalisaSaran(); } else toast(r.msg || "Gagal menghapus");
 }
 
 async function simpanDiagnosaMedisDokter(){
