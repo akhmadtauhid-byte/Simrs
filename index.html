@@ -640,9 +640,10 @@ async function muatRekapPegawai(){
   const r = await api("rekapPegawai", {dari: val("rekapDari"), sampai: val("rekapSampai")}, "POST");
   if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat rekap"}</div>`; return; }
   if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada data pegawai aktif.</div>`; return; }
-  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>Jumlah Tindakan</th><th>DPJP Kunjungan</th><th>DPJP Rawat Inap</th></tr>
-    ${r.data.map(x=>`<tr><td>${x.nama}</td><td>${x.jabatan||"-"}</td><td>${x.jumlahTindakan}</td><td>${x.jumlahDPJPKunjungan}</td><td>${x.jumlahDPJPRawatInap}</td></tr>`).join("")}
-    </table>`;
+  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>Jumlah Tindakan</th><th>DPJP Kunjungan</th><th>DPJP Rawat Inap</th><th>Total Jasa Medis</th><th>Total Jasa Perawat</th></tr>
+    ${r.data.map(x=>`<tr><td>${x.nama}</td><td>${x.jabatan||"-"}</td><td>${x.jumlahTindakan}</td><td>${x.jumlahDPJPKunjungan}</td><td>${x.jumlahDPJPRawatInap}</td><td>Rp${Number(x.totalJasaMedis||0).toLocaleString('id-ID')}</td><td>Rp${Number(x.totalJasaPerawat||0).toLocaleString('id-ID')}</td></tr>`).join("")}
+    </table>
+    <p class="hint" style="margin-top:8px">Total Jasa Medis/Jasa Perawat dihitung otomatis dari Tindakan yang dicatat memakai "Kombinasi Pelaksana" (lihat Master Tarif &gt; Kombinasi Pelaksana) pada rentang tanggal di atas.</p>`;
 }
 
 /* ================== LOG AKTIVITAS SISTEM (AUDIT LOG, khusus admin) ================== */
@@ -1927,6 +1928,9 @@ async function pageRekamMedis(el){
           <select id="pelaksanaId" onchange="onPegawaiSelectChange('pelaksanaId','pelaksanaManual')"><option value="">Memuat daftar pegawai...</option></select>
           <input id="pelaksanaManual" style="display:none;margin-top:6px" placeholder="Ketik nama pelaksana manual (kalau belum ada di daftar pegawai)"></div></div>
       <label>Deskripsi Tindakan</label><input id="deskTindakan" placeholder="cth: Injeksi terapeutik">
+      <label>Kombinasi Pelaksana (opsional — utk pembagian otomatis Jasa Medis/Jasa Perawat)</label>
+      <select id="kombinasiTindakanId" onchange="onKombinasiTindakanChange()"><option value="">-- Tidak pakai pembagian otomatis --</option></select>
+      <div id="kombinasiTindakanSlots" style="margin-top:6px"></div>
       <button class="btn" style="margin-top:10px" onclick="submitTindakan()">Tambah Tindakan</button>
       <button class="btn ghost" id="btnBatalEditTindakan" style="margin-top:10px;display:none" onclick="batalEditTindakan()">Batal Edit</button>
     </div>
@@ -1978,8 +1982,9 @@ async function pageRekamMedis(el){
       </td></tr>`).join("")}
   </table>` : `<div class="empty">Belum ada diagnosa</div>`}</div>
   <div class="section-title">Tindakan Tercatat</div>
-  <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th><th></th></tr>
+  <div class="card">${d.tindakan.length ? `<table><tr><th>Kode</th><th>Deskripsi</th><th>Pelaksana</th><th>Pembagian Jasa</th><th></th></tr>
     ${d.tindakan.map(x=>`<tr><td>${x.kodeICD9||x.KodeICD9}</td><td>${x.deskripsi||x.Deskripsi}</td><td>${x.pelaksana||x.Pelaksana||"-"}</td>
+      <td style="font-size:12px">${(x.pelaksanaDetail && x.pelaksanaDetail.length) ? x.pelaksanaDetail.map(pd=>`${esc(pd.pegawaiNama)}: Rp${Number(pd.jumlahRupiah||0).toLocaleString('id-ID')}`).join('<br>') : '<span class="hint">-</span>'}</td>
       <td style="white-space:nowrap">
         <button class="btn sm ghost" onclick='mulaiEditTindakan(${JSON.stringify(x)})'>Edit</button>
         <button class="btn sm danger" onclick="hapusTindakanRow('${x.id}')">Hapus</button>
@@ -2014,6 +2019,7 @@ async function pageRekamMedis(el){
   <div id="areaRiwayatPasienRM"></div>`;
   isiSelectPegawai("dpjpRIId");
   isiSelectPegawai("pelaksanaId");
+  isiSelectKombinasiTindakan();
   await muatRiwayatPasienRM(d.pasien && (d.pasien.RM || d.pasien.rm));
 }
 async function muatRiwayatPasienRM(rm){
@@ -2091,15 +2097,59 @@ async function hapusDiagnosaRow(id){
   const r = await api("diagnosa.hapus", {id}, "POST");
   if(r.ok){ toast("Diagnosa dihapus"); await renderPertahankanAnalisaSaran(); } else toast(r.msg || "Gagal menghapus");
 }
+// Isi <select> Kombinasi Pelaksana (aktif saja, kecuali sedang dipakai baris
+// yang sedang diedit -- ditangani lewat parameter kombinasiTerpakaiId supaya
+// kombinasi yang sudah dinonaktifkan tetap muncul untuk baris lama itu).
+async function isiSelectKombinasiTindakan(kombinasiTerpakaiId){
+  const sel = document.getElementById("kombinasiTindakanId");
+  if(!sel) return;
+  const r = await api("kombinasiPelaksana.list", {}, "POST");
+  const list = Array.isArray(r) ? r : [];
+  window.__kombinasiPelaksanaCacheTindakan = list;
+  sel.innerHTML = `<option value="">-- Tidak pakai pembagian otomatis --</option>` +
+    list.filter(k => k.aktif !== false || k.id === kombinasiTerpakaiId)
+      .map(k=>`<option value="${k.id}">${(k.namaKombinasi||"").replace(/</g,"&lt;")}${k.aktif===false?" (nonaktif)":""}</option>`).join("");
+}
+// Tampilkan 1 dropdown pegawai per slot/peran dari Kombinasi Pelaksana yang
+// dipilih. Pemilihan pegawai per slot OPSIONAL -- slot yang dibiarkan kosong
+// dilewati oleh server (bisa dilengkapi belakangan lewat Edit Tindakan).
+async function onKombinasiTindakanChange(pelaksanaDetailAwal){
+  const box = document.getElementById("kombinasiTindakanSlots");
+  const kombId = val("kombinasiTindakanId");
+  if(!box) return;
+  if(!kombId){ box.innerHTML = ""; return; }
+  const komb = (window.__kombinasiPelaksanaCacheTindakan||[]).find(k=>k.id===kombId);
+  if(!komb){ box.innerHTML = ""; return; }
+  const pegawaiList = await getPegawaiCache();
+  const detailByUrutan = {};
+  (pelaksanaDetailAwal||[]).forEach(pd => { detailByUrutan[pd.slotUrutan] = pd; });
+  box.innerHTML = (komb.slots||[]).map(s => {
+    const terpilih = detailByUrutan[s.urutan];
+    return `<div class="row" style="align-items:flex-end;margin-bottom:4px">
+      <div><label>${esc(s.labelPeran)} (${esc(s.jenisPeran)}, ${s.persenShare}%)</label>
+        <select class="kombSlotPegawai" data-urutan="${s.urutan}">
+          <option value="">-- belum dipilih --</option>
+          ${pegawaiList.map(p=>`<option value="${p.id}"${terpilih && terpilih.pegawaiId===p.id?' selected':''}>${(p.nama||"").replace(/</g,"&lt;")}${p.jabatan?(" — "+(p.jabatan||"").replace(/</g,"&lt;")):""}</option>`).join("")}
+        </select></div>
+    </div>`;
+  }).join("");
+}
+function kumpulkanPelaksanaSlot(){
+  return Array.from(document.querySelectorAll('#kombinasiTindakanSlots .kombSlotPegawai'))
+    .filter(sel => sel.value)
+    .map(sel => ({urutan: Number(sel.dataset.urutan), pegawaiId: sel.value}));
+}
 async function submitTindakan(){
   const pelPilih = pegawaiPayload("pelaksanaId","pelaksanaManual");
   const editId = val("editTindakanId");
+  const kombinasiPelaksanaId = val("kombinasiTindakanId") || null;
+  const pelaksanaSlot = kumpulkanPelaksanaSlot();
   const r = editId
-    ? await api("tindakan.edit", {id: editId, kodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST")
-    : await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama}, "POST");
+    ? await api("tindakan.edit", {id: editId, kodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama, kombinasiPelaksanaId, pelaksanaSlot}, "POST")
+    : await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama, kombinasiPelaksanaId, pelaksanaSlot}, "POST");
   if(r.ok){ toast(editId ? "Tindakan diperbarui" : "Tindakan ditambahkan"); batalEditTindakan(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
 }
-function mulaiEditTindakan(x){
+async function mulaiEditTindakan(x){
   document.getElementById("tindakanFormTitle").textContent = "Ubah Tindakan";
   document.getElementById("editTindakanId").value = x.id;
   document.getElementById("kodeICD9").value = x.kodeICD9 || x.KodeICD9 || "";
@@ -2107,6 +2157,9 @@ function mulaiEditTindakan(x){
   document.getElementById("pelaksanaId").value = "__manual__";
   document.getElementById("pelaksanaManual").style.display = "block";
   document.getElementById("pelaksanaManual").value = x.pelaksana || x.Pelaksana || "";
+  await isiSelectKombinasiTindakan(x.kombinasiPelaksanaId);
+  document.getElementById("kombinasiTindakanId").value = x.kombinasiPelaksanaId || "";
+  await onKombinasiTindakanChange(x.pelaksanaDetail);
   document.getElementById("btnBatalEditTindakan").style.display = "inline-block";
   window.scrollTo(0,0);
 }
@@ -2118,7 +2171,10 @@ function batalEditTindakan(){
   document.getElementById("pelaksanaId").value = "";
   document.getElementById("pelaksanaManual").style.display = "none";
   document.getElementById("pelaksanaManual").value = "";
+  document.getElementById("kombinasiTindakanId").value = "";
+  document.getElementById("kombinasiTindakanSlots").innerHTML = "";
   document.getElementById("btnBatalEditTindakan").style.display = "none";
+  isiSelectKombinasiTindakan();
 }
 async function hapusTindakanRow(id){
   if(!confirm("Hapus permanen baris tindakan ini? (tercatat di Log Audit)")) return;
@@ -4555,6 +4611,7 @@ async function pageTarif(el){
         ${Object.keys(TARIF_UNIT_LABEL).map(u=>`<button class="btn" onclick="renderTarifTab('${u}')">${TARIF_UNIT_LABEL[u]}</button>`).join("")}
         <button class="btn" onclick="renderTarifTab('unitcost')">🏭 Unit Cost (Biaya Riil RS)</button>
         <button class="btn" onclick="renderTarifTab('tindakan')">🩺 Tarif Tindakan</button>
+        <button class="btn" onclick="renderTarifTab('kombinasi')">👥 Kombinasi Pelaksana</button>
         <button class="btn ghost" onclick="bukaFarmasiDariTarif()">💊 Harga Obat Farmasi →</button>
       </div>
       <div id="tarifBody"></div>
@@ -4637,11 +4694,44 @@ async function renderTarifTab(tab){
         <div><label>Tarif Rawat Jalan — BPJS</label><input id="tt_rj_bpjs" type="number"></div>
         <div><label>Tarif Rawat Jalan — Umum</label><input id="tt_rj_umum" type="number"></div>
       </div>
+      <div class="section-title" style="margin-top:14px">Pembagian Porsi Biaya (opsional)</div>
+      <p class="hint">Berapa persen dari tarif di atas (angka yang sama dipakai untuk keempat kombinasi RI/RJ × BPJS/Umum) yang jadi Profit RS, Jasa Medis, Jasa Perawat, BHP (Bahan Habis Pakai), dan Remunerasi Tidak Langsung. Total kelima kolom harus <b>tepat 100%</b>, atau kosongkan semua (0) kalau belum mau diatur — Jasa Medis &amp; Jasa Perawat di sini yang nanti dibagi ke staf lewat "Kombinasi Pelaksana" saat tindakan dicatat.</p>
+      <div class="row">
+        <div><label>Profit RS (%)</label><input id="tt_p_profit" type="number" step="0.01" oninput="ttHitungTotalPersen()"></div>
+        <div><label>Jasa Medis (%)</label><input id="tt_p_medis" type="number" step="0.01" oninput="ttHitungTotalPersen()"></div>
+        <div><label>Jasa Perawat (%)</label><input id="tt_p_perawat" type="number" step="0.01" oninput="ttHitungTotalPersen()"></div>
+      </div>
+      <div class="row">
+        <div><label>BHP (%)</label><input id="tt_p_bhp" type="number" step="0.01" oninput="ttHitungTotalPersen()"></div>
+        <div><label>Remunerasi Tidak Langsung (%)</label><input id="tt_p_remun" type="number" step="0.01" oninput="ttHitungTotalPersen()"></div>
+        <div><label>Total</label><input id="tt_p_total" type="text" disabled value="0%"></div>
+      </div>
       <button class="btn" onclick="submitTarifTindakan()">Simpan</button>
       <button class="btn ghost" onclick="batalEditTarifTindakan()">Batal / Bersihkan Form</button>
       ${kotakCariTarifHtml('Cari nama tindakan/kode ICD-9...')}
       <div id="tfList"></div>`;
     await muatTarifTindakanList();
+    ttHitungTotalPersen();
+  } else if (tab === 'kombinasi') {
+    // Kombinasi Pelaksana: menentukan bagaimana pool Jasa Medis+Jasa Perawat
+    // suatu tindakan dibagi ke staf yang benar-benar mengerjakannya (mis.
+    // Dokter Sendiri, Perawat Sendiri, Dokter+Perawat, Perawat 1+Perawat 2)
+    // -- TIDAK mengubah total tarif tindakan sama sekali. RS bebas menambah
+    // kombinasi & peran/slotnya sendiri, tidak dibatasi daftar baku.
+    body.innerHTML = `
+      <p class="hint">Dipakai saat mencatat Tindakan ke pasien (opsional) untuk membagi otomatis uang Jasa Medis + Jasa Perawat tindakan itu ke staf yang benar-benar mengerjakannya, sesuai peran masing-masing. Tidak mengubah total tarif tindakan. Total persen semua peran dalam 1 kombinasi harus tepat 100%.</p>
+      <input type="hidden" id="kp_editId" value="">
+      <label>Nama Kombinasi</label><input id="kp_nama" placeholder="cth: Dokter Sendiri, Perawat Sendiri, Dokter+Perawat, Perawat 1+Perawat 2">
+      <div class="section-title" style="margin-top:10px">Peran / Slot</div>
+      <div id="kpSlotRows"></div>
+      <button class="btn ghost sm" style="margin-top:6px" onclick="kpTambahSlotRow()">+ Tambah Peran</button>
+      <p class="hint">Total persen: <b id="kp_totalPersen">0%</b></p>
+      <button class="btn" style="margin-top:10px" onclick="submitKombinasiPelaksana()">Simpan Kombinasi</button>
+      <button class="btn ghost" onclick="batalEditKombinasiPelaksana()">Batal / Bersihkan Form</button>
+      <div class="section-title" style="margin-top:18px">Daftar Kombinasi Pelaksana</div>
+      <div id="kpList">Memuat...</div>`;
+    batalEditKombinasiPelaksana();
+    await muatKombinasiPelaksanaList();
   } else if (tab === 'unitcost') {
     // Unit Cost = biaya riil RS per kode CBG, diisi manual dari studi biaya
     // keuangan internal (BUKAN data resmi BPJS seperti tarif_cbg_referensi
@@ -4843,7 +4933,7 @@ async function tfJalanHapus(kode){
 function renderTarifTindakanList(rows){
   if(!rows || !rows.length) return '<p class="sub">Belum ada Tarif Tindakan. Isi Nama Tindakan di atas untuk menambahkan (Kode ICD-9-CM opsional, boleh dikosongkan).</p>';
   return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Tindakan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode ICD-9</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Tindakan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode ICD-9</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Komponen Biaya</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
     rows.map(r=>`<tr>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.namaTindakan)}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.kodeIcd9 ? esc(r.kodeIcd9) : '<span class="hint">-</span>'}</td>
@@ -4851,6 +4941,11 @@ function renderTarifTindakanList(rows){
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRiUmum||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjBpjs||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjUmum||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);font-size:12px">${
+        (Number(r.persenProfitRs||0)+Number(r.persenJasaMedis||0)+Number(r.persenJasaPerawat||0)+Number(r.persenBhp||0)+Number(r.persenRemunerasiTidakLangsung||0)) > 0
+          ? `RS ${r.persenProfitRs||0}% · JM ${r.persenJasaMedis||0}% · JP ${r.persenJasaPerawat||0}% · BHP ${r.persenBhp||0}% · RTL ${r.persenRemunerasiTidakLangsung||0}%`
+          : '<span class="hint">belum diatur</span>'
+      }</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span style="color:var(--muted)">Nonaktif</span>' : '<span style="color:#0a7a3d">Aktif</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
         <button class="btn sm ghost" onclick='tfTindakanEdit(${JSON.stringify(r.id)})'>Edit</button>
@@ -4864,6 +4959,16 @@ async function muatTarifTindakanList(){
   window.__tarifTindakanCache = rows || [];
   setTarifListState(rows, renderTarifTindakanList, ['namaTindakan','kodeIcd9','deskripsiIcd9'], 'tfList');
 }
+// Tampilkan total 5 kolom persen komponen biaya secara real-time supaya staf
+// tahu sebelum klik Simpan apakah totalnya sudah pas 100% atau belum.
+function ttHitungTotalPersen(){
+  const total = ['tt_p_profit','tt_p_medis','tt_p_perawat','tt_p_bhp','tt_p_remun']
+    .reduce((sum,id)=> sum + (Number(val(id))||0), 0);
+  const el = document.getElementById('tt_p_total');
+  if(!el) return;
+  el.value = total + '%';
+  el.style.color = (total === 0 || total === 100) ? '' : '#c0392b';
+}
 async function submitTarifTindakan(){
   const namaTindakan = val('tt_nama');
   if(!namaTindakan){ toast('Nama Tindakan wajib diisi'); return; }
@@ -4871,7 +4976,10 @@ async function submitTarifTindakan(){
     id: val('tt_editId') || undefined,
     namaTindakan, kodeIcd9: val('tt_kode') || null,
     tarifRiBpjs: Number(val('tt_ri_bpjs'))||0, tarifRiUmum: Number(val('tt_ri_umum'))||0,
-    tarifRjBpjs: Number(val('tt_rj_bpjs'))||0, tarifRjUmum: Number(val('tt_rj_umum'))||0
+    tarifRjBpjs: Number(val('tt_rj_bpjs'))||0, tarifRjUmum: Number(val('tt_rj_umum'))||0,
+    persenProfitRs: Number(val('tt_p_profit'))||0, persenJasaMedis: Number(val('tt_p_medis'))||0,
+    persenJasaPerawat: Number(val('tt_p_perawat'))||0, persenBhp: Number(val('tt_p_bhp'))||0,
+    persenRemunerasiTidakLangsung: Number(val('tt_p_remun'))||0
   }, 'POST');
   if(r.ok){ toast('Tarif Tindakan tersimpan'); batalEditTarifTindakan(); await muatTarifTindakanList(); }
   else toast(r.msg || 'Gagal menyimpan');
@@ -4885,6 +4993,12 @@ function batalEditTarifTindakan(){
   document.getElementById('tt_ri_umum').value = '';
   document.getElementById('tt_rj_bpjs').value = '';
   document.getElementById('tt_rj_umum').value = '';
+  document.getElementById('tt_p_profit').value = '';
+  document.getElementById('tt_p_medis').value = '';
+  document.getElementById('tt_p_perawat').value = '';
+  document.getElementById('tt_p_bhp').value = '';
+  document.getElementById('tt_p_remun').value = '';
+  ttHitungTotalPersen();
 }
 function tfTindakanEdit(id){
   const r = (window.__tarifTindakanCache||[]).find(x=>x.id===id);
@@ -4897,6 +5011,12 @@ function tfTindakanEdit(id){
   document.getElementById('tt_ri_umum').value = r.tarifRiUmum||0;
   document.getElementById('tt_rj_bpjs').value = r.tarifRjBpjs||0;
   document.getElementById('tt_rj_umum').value = r.tarifRjUmum||0;
+  document.getElementById('tt_p_profit').value = r.persenProfitRs||0;
+  document.getElementById('tt_p_medis').value = r.persenJasaMedis||0;
+  document.getElementById('tt_p_perawat').value = r.persenJasaPerawat||0;
+  document.getElementById('tt_p_bhp').value = r.persenBhp||0;
+  document.getElementById('tt_p_remun').value = r.persenRemunerasiTidakLangsung||0;
+  ttHitungTotalPersen();
   document.getElementById('tt_nama').scrollIntoView({behavior:'smooth', block:'center'});
   toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
 }
@@ -4910,6 +5030,97 @@ async function tfTindakanHapus(id, nama){
   const r = await api('tarifTindakan.hapus', {id}, 'POST');
   toast(r.ok ? 'Tarif Tindakan dihapus' : (r.msg || 'Gagal menghapus'));
   if(r.ok) await muatTarifTindakanList();
+}
+
+/* ---------------- Kombinasi Pelaksana (siapa mengerjakan tindakan) ---------------- */
+let _kpSlotSeq = 0;
+function kpSlotRowHtml(slot){
+  slot = slot || {labelPeran:'', jenisPeran:'Lainnya', persenShare:''};
+  const rid = 'kpslot_' + (++_kpSlotSeq);
+  return `<div class="row" id="${rid}" style="align-items:flex-end;margin-bottom:6px">
+    <div><label>Nama Peran</label><input class="kp-label" placeholder="cth: Dokter Pelaksana, Perawat 1" value="${esc(slot.labelPeran||'')}"></div>
+    <div><label>Jenis (utk laporan)</label><select class="kp-jenis">
+      ${['Dokter','Perawat','Lainnya'].map(j=>`<option value="${j}"${slot.jenisPeran===j?' selected':''}>${j}</option>`).join("")}
+    </select></div>
+    <div><label>Porsi (%)</label><input class="kp-persen" type="number" step="0.01" value="${slot.persenShare||''}" oninput="kpHitungTotalPersen()"></div>
+    <div style="flex:0 0 auto"><button class="btn sm danger" onclick="document.getElementById('${rid}').remove(); kpHitungTotalPersen();">Hapus</button></div>
+  </div>`;
+}
+function kpTambahSlotRow(slot){
+  document.getElementById('kpSlotRows').insertAdjacentHTML('beforeend', kpSlotRowHtml(slot));
+  kpHitungTotalPersen();
+}
+function kpHitungTotalPersen(){
+  const total = Array.from(document.querySelectorAll('#kpSlotRows .kp-persen'))
+    .reduce((sum,el)=> sum + (Number(el.value)||0), 0);
+  const el = document.getElementById('kp_totalPersen');
+  if(!el) return;
+  el.textContent = total + '%';
+  el.style.color = (total === 100) ? '#0a7a3d' : '#c0392b';
+}
+async function muatKombinasiPelaksanaList(){
+  const r = await api('kombinasiPelaksana.list', {}, 'POST');
+  window.__kombinasiPelaksanaCache = Array.isArray(r) ? r : [];
+  renderKombinasiPelaksanaList(window.__kombinasiPelaksanaCache);
+}
+function renderKombinasiPelaksanaList(rows){
+  const box = document.getElementById('kpList');
+  if(!box) return;
+  if(!rows || !rows.length){ box.innerHTML = '<p class="sub">Belum ada Kombinasi Pelaksana. Isi form di atas untuk menambahkan.</p>'; return; }
+  box.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Kombinasi</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Peran &amp; Porsi</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    rows.map(r=>`<tr>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.namaKombinasi)}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);font-size:12px">${(r.slots||[]).map(s=>`${esc(s.labelPeran)} (${esc(s.jenisPeran)}, ${s.persenShare}%)`).join(' + ')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span style="color:var(--muted)">Nonaktif</span>' : '<span style="color:#0a7a3d">Aktif</span>'}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick='kpEdit(${JSON.stringify(r.id)})'>Edit</button>
+        <button class="btn sm ghost" onclick='kpSetAktif(${JSON.stringify(r.id)},${r.aktif===false})'>${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick='kpHapus(${JSON.stringify(r.id)},${JSON.stringify(r.namaKombinasi)})'>Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>';
+}
+async function submitKombinasiPelaksana(){
+  const namaKombinasi = val('kp_nama');
+  if(!namaKombinasi){ toast('Nama Kombinasi wajib diisi'); return; }
+  const slots = Array.from(document.querySelectorAll('#kpSlotRows > div')).map(row => ({
+    labelPeran: row.querySelector('.kp-label').value.trim(),
+    jenisPeran: row.querySelector('.kp-jenis').value,
+    persenShare: Number(row.querySelector('.kp-persen').value)||0
+  }));
+  if(!slots.length){ toast('Tambahkan minimal 1 peran/slot'); return; }
+  const r = await api('kombinasiPelaksana.simpan', {id: val('kp_editId')||undefined, namaKombinasi, slots}, 'POST');
+  if(r.ok){ toast('Kombinasi Pelaksana tersimpan'); batalEditKombinasiPelaksana(); await muatKombinasiPelaksanaList(); }
+  else toast(r.msg || 'Gagal menyimpan');
+}
+function batalEditKombinasiPelaksana(){
+  document.getElementById('kp_editId').value = '';
+  document.getElementById('kp_nama').value = '';
+  document.getElementById('kpSlotRows').innerHTML = '';
+  kpTambahSlotRow();
+  kpTambahSlotRow();
+}
+function kpEdit(id){
+  const r = (window.__kombinasiPelaksanaCache||[]).find(x=>x.id===id);
+  if(!r) return;
+  document.getElementById('kp_editId').value = r.id;
+  document.getElementById('kp_nama').value = r.namaKombinasi||'';
+  document.getElementById('kpSlotRows').innerHTML = '';
+  (r.slots||[]).forEach(s=>kpTambahSlotRow(s));
+  kpHitungTotalPersen();
+  document.getElementById('kp_nama').scrollIntoView({behavior:'smooth', block:'center'});
+  toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
+}
+async function kpSetAktif(id, aktifBaru){
+  const r = await api('kombinasiPelaksana.setAktif', {id, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru ? 'Kombinasi diaktifkan kembali' : 'Kombinasi dinonaktifkan') : (r.msg || 'Gagal menyimpan'));
+  if(r.ok) await muatKombinasiPelaksanaList();
+}
+async function kpHapus(id, nama){
+  if(!confirm(`Hapus permanen Kombinasi Pelaksana "${nama}"?\n\nRiwayat pembagian jasa yang sudah tercatat sebelumnya TIDAK ikut terhapus, tapi kombinasi ini tidak akan bisa dipilih lagi untuk tindakan baru.`)) return;
+  const r = await api('kombinasiPelaksana.hapus', {id}, 'POST');
+  toast(r.ok ? 'Kombinasi Pelaksana dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) await muatKombinasiPelaksanaList();
 }
 
 async function tfSubmit(action, data, tab){
