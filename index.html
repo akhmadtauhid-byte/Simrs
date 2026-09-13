@@ -4613,19 +4613,22 @@ async function renderTarifTab(tab){
     const rows = await api('tarif.listLayanan', {unit: tab}, 'POST');
     setTarifListState(rows, r => renderTarifLayananList(r, tab), ['Kode_Layanan','Kategori','Nama_Layanan']);
   } else if (tab === 'tindakan') {
-    // Tarif Tindakan: 4 angka per kode ICD-9-CM (RI/RJ x BPJS/Umum). Begitu
+    // Tarif Tindakan: 4 angka per Nama Tindakan (RI/RJ x BPJS/Umum). Begitu
     // staf mencatat Tindakan ke kunjungan pasien, sistem otomatis membuat
     // baris Billing dari salah satu dari 4 angka ini sesuai jenis kunjungan
     // & penjamin pasien -- staf tidak perlu ketik tarif manual lagi.
+    // Nama Tindakan WAJIB & jadi kunci utama (bebas, sesuai istilah RS
+    // sendiri) -- Kode ICD-9-CM OPSIONAL murni, cuma untuk pemetaan referensi
+    // ke kode resmi INA-CBG/e-Klaim kalau RS mau, TIDAK wajib diisi.
     body.innerHTML = `
-      <p class="hint">"Umum" = pasien bayar sendiri (cash-pay)/Asuransi Lain. Kosongkan (0) kombinasi yang belum berlaku untuk tindakan ini — sistem tidak akan membuat tagihan otomatis untuk kombinasi yang masih 0.</p>
-      <input type="hidden" id="tt_editMode" value="0">
-      <div style="position:relative;"><label>Cari Kode ICD-9-CM (Tindakan)</label>
-        <input id="ttCariICD9" placeholder="ketik kode atau nama tindakan..." oninput="cariKode('ttCariICD9','ttSaranICD9',searchICD9API)">
+      <p class="hint">"Umum" = pasien bayar sendiri (cash-pay)/Asuransi Lain. Kosongkan (0) kombinasi yang belum berlaku untuk tindakan ini — sistem tidak akan membuat tagihan otomatis untuk kombinasi yang masih 0. Nama Tindakan bebas sesuai istilah RS sendiri — TIDAK harus sama dengan nama resmi ICD-9-CM.</p>
+      <input type="hidden" id="tt_editId" value="">
+      <label>Nama Tindakan</label><input id="tt_nama" placeholder="cth: Jahit Luka Kecil, Nebulizer, Ganti Verband">
+      <div style="position:relative;"><label>Kode ICD-9-CM (opsional — untuk pemetaan ke kode resmi INA-CBG/e-Klaim, boleh dikosongkan)</label>
+        <input id="ttCariICD9" placeholder="opsional, ketik kode atau nama resmi ICD-9 kalau ingin dipetakan..." oninput="cariKode('ttCariICD9','ttSaranICD9',searchICD9API)">
         <div id="ttSaranICD9" class="suggest-box"></div>
       </div>
-      <label>Kode ICD-9-CM (terpilih)</label><input id="tt_kode" placeholder="cth: 00.01">
-      <label>Nama Tindakan (opsional, kosongkan untuk pakai deskripsi ICD-9)</label><input id="tt_nama">
+      <label>Kode ICD-9-CM (terpilih, opsional)</label><input id="tt_kode" placeholder="boleh dikosongkan">
       <div class="row">
         <div><label>Tarif Rawat Inap — BPJS</label><input id="tt_ri_bpjs" type="number"></div>
         <div><label>Tarif Rawat Inap — Umum</label><input id="tt_ri_umum" type="number"></div>
@@ -4636,7 +4639,7 @@ async function renderTarifTab(tab){
       </div>
       <button class="btn" onclick="submitTarifTindakan()">Simpan</button>
       <button class="btn ghost" onclick="batalEditTarifTindakan()">Batal / Bersihkan Form</button>
-      ${kotakCariTarifHtml('Cari kode/nama tindakan...')}
+      ${kotakCariTarifHtml('Cari nama tindakan/kode ICD-9...')}
       <div id="tfList"></div>`;
     await muatTarifTindakanList();
   } else if (tab === 'unitcost') {
@@ -4838,34 +4841,35 @@ async function tfJalanHapus(kode){
 }
 
 function renderTarifTindakanList(rows){
-  if(!rows || !rows.length) return '<p class="sub">Belum ada Tarif Tindakan. Cari kode ICD-9-CM di atas lalu isi form untuk menambahkan.</p>';
+  if(!rows || !rows.length) return '<p class="sub">Belum ada Tarif Tindakan. Isi Nama Tindakan di atas untuk menambahkan (Kode ICD-9-CM opsional, boleh dikosongkan).</p>';
   return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode ICD-9</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Tindakan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Tindakan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode ICD-9</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
     rows.map(r=>`<tr>
-      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.kodeIcd9)}</td>
-      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.namaTindakan||r.deskripsiIcd9||'-')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.namaTindakan)}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.kodeIcd9 ? esc(r.kodeIcd9) : '<span class="hint">-</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRiBpjs||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRiUmum||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjBpjs||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjUmum||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span style="color:var(--muted)">Nonaktif</span>' : '<span style="color:#0a7a3d">Aktif</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
-        <button class="btn sm ghost" onclick='tfTindakanEdit(${JSON.stringify(r.kodeIcd9)})'>Edit</button>
-        <button class="btn sm ghost" onclick='tfTindakanSetAktif(${JSON.stringify(r.kodeIcd9)},${r.aktif===false})'>${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
-        <button class="btn sm danger" onclick='tfTindakanHapus(${JSON.stringify(r.kodeIcd9)})'>Hapus</button>
+        <button class="btn sm ghost" onclick='tfTindakanEdit(${JSON.stringify(r.id)})'>Edit</button>
+        <button class="btn sm ghost" onclick='tfTindakanSetAktif(${JSON.stringify(r.id)},${r.aktif===false})'>${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick='tfTindakanHapus(${JSON.stringify(r.id)},${JSON.stringify(r.namaTindakan)})'>Hapus</button>
       </td>
     </tr>`).join("") + '</table>';
 }
 async function muatTarifTindakanList(){
   const rows = await api('tarifTindakan.list', {}, 'POST');
   window.__tarifTindakanCache = rows || [];
-  setTarifListState(rows, renderTarifTindakanList, ['kodeIcd9','namaTindakan','deskripsiIcd9'], 'tfList');
+  setTarifListState(rows, renderTarifTindakanList, ['namaTindakan','kodeIcd9','deskripsiIcd9'], 'tfList');
 }
 async function submitTarifTindakan(){
-  const kodeIcd9 = val('tt_kode');
-  if(!kodeIcd9){ toast('Pilih dulu Kode ICD-9-CM dari saran pencarian'); return; }
+  const namaTindakan = val('tt_nama');
+  if(!namaTindakan){ toast('Nama Tindakan wajib diisi'); return; }
   const r = await api('tarifTindakan.simpan', {
-    kodeIcd9, namaTindakan: val('tt_nama'),
+    id: val('tt_editId') || undefined,
+    namaTindakan, kodeIcd9: val('tt_kode') || null,
     tarifRiBpjs: Number(val('tt_ri_bpjs'))||0, tarifRiUmum: Number(val('tt_ri_umum'))||0,
     tarifRjBpjs: Number(val('tt_rj_bpjs'))||0, tarifRjUmum: Number(val('tt_rj_umum'))||0
   }, 'POST');
@@ -4873,7 +4877,7 @@ async function submitTarifTindakan(){
   else toast(r.msg || 'Gagal menyimpan');
 }
 function batalEditTarifTindakan(){
-  document.getElementById('tt_editMode').value = '0';
+  document.getElementById('tt_editId').value = '';
   document.getElementById('ttCariICD9').value = '';
   document.getElementById('tt_kode').value = '';
   document.getElementById('tt_nama').value = '';
@@ -4882,28 +4886,28 @@ function batalEditTarifTindakan(){
   document.getElementById('tt_rj_bpjs').value = '';
   document.getElementById('tt_rj_umum').value = '';
 }
-function tfTindakanEdit(kodeIcd9){
-  const r = (window.__tarifTindakanCache||[]).find(x=>x.kodeIcd9===kodeIcd9);
+function tfTindakanEdit(id){
+  const r = (window.__tarifTindakanCache||[]).find(x=>x.id===id);
   if(!r) return;
-  document.getElementById('tt_editMode').value = '1';
-  document.getElementById('ttCariICD9').value = kodeIcd9 + ' — ' + (r.namaTindakan||r.deskripsiIcd9||'');
-  document.getElementById('tt_kode').value = r.kodeIcd9;
+  document.getElementById('tt_editId').value = r.id;
+  document.getElementById('ttCariICD9').value = r.kodeIcd9 ? (r.kodeIcd9 + ' — ' + (r.deskripsiIcd9||'')) : '';
+  document.getElementById('tt_kode').value = r.kodeIcd9||'';
   document.getElementById('tt_nama').value = r.namaTindakan||'';
   document.getElementById('tt_ri_bpjs').value = r.tarifRiBpjs||0;
   document.getElementById('tt_ri_umum').value = r.tarifRiUmum||0;
   document.getElementById('tt_rj_bpjs').value = r.tarifRjBpjs||0;
   document.getElementById('tt_rj_umum').value = r.tarifRjUmum||0;
-  document.getElementById('tt_kode').scrollIntoView({behavior:'smooth', block:'center'});
+  document.getElementById('tt_nama').scrollIntoView({behavior:'smooth', block:'center'});
   toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
 }
-async function tfTindakanSetAktif(kodeIcd9, aktifBaru){
-  const r = await api('tarifTindakan.setAktif', {kodeIcd9, aktif: aktifBaru}, 'POST');
+async function tfTindakanSetAktif(id, aktifBaru){
+  const r = await api('tarifTindakan.setAktif', {id, aktif: aktifBaru}, 'POST');
   toast(r.ok ? (aktifBaru ? 'Tarif Tindakan diaktifkan kembali' : 'Tarif Tindakan dinonaktifkan') : (r.msg || 'Gagal menyimpan'));
   if(r.ok) await muatTarifTindakanList();
 }
-async function tfTindakanHapus(kodeIcd9){
-  if(!confirm(`Hapus permanen Tarif Tindakan untuk kode "${kodeIcd9}"?`)) return;
-  const r = await api('tarifTindakan.hapus', {kodeIcd9}, 'POST');
+async function tfTindakanHapus(id, nama){
+  if(!confirm(`Hapus permanen Tarif Tindakan "${nama}"?`)) return;
+  const r = await api('tarifTindakan.hapus', {id}, 'POST');
   toast(r.ok ? 'Tarif Tindakan dihapus' : (r.msg || 'Gagal menghapus'));
   if(r.ok) await muatTarifTindakanList();
 }
