@@ -1016,9 +1016,11 @@ function render(){
 async function renderPertahankanAnalisaSaran(){
   const elTeks = document.getElementById("diagnosaMedisDokter");
   const elSaran10 = document.getElementById("saranICD10DariDiagnosa");
+  const elSaran10Sekunder = document.getElementById("saranICD10SekunderDariDiagnosa");
   const elSaran9 = document.getElementById("saranICD9DariDiagnosa");
   const teksSekarang = elTeks ? elTeks.value : null;
   const saran10Sekarang = elSaran10 ? elSaran10.innerHTML : null;
+  const saran10SekunderSekarang = elSaran10Sekunder ? elSaran10Sekunder.innerHTML : null;
   const saran9Sekarang = elSaran9 ? elSaran9.innerHTML : null;
   await render();
   if(teksSekarang !== null){
@@ -1028,6 +1030,10 @@ async function renderPertahankanAnalisaSaran(){
   if(saran10Sekarang !== null){
     const elSaran10Baru = document.getElementById("saranICD10DariDiagnosa");
     if(elSaran10Baru) elSaran10Baru.innerHTML = saran10Sekarang;
+  }
+  if(saran10SekunderSekarang !== null){
+    const elSaran10SekunderBaru = document.getElementById("saranICD10SekunderDariDiagnosa");
+    if(elSaran10SekunderBaru) elSaran10SekunderBaru.innerHTML = saran10SekunderSekarang;
   }
   if(saran9Sekarang !== null){
     const elSaran9Baru = document.getElementById("saranICD9DariDiagnosa");
@@ -1548,6 +1554,7 @@ function pilihKode(inputId, boxId, kode, desk){
   document.getElementById(boxId).classList.remove("show");
   document.getElementById(inputId).value = kode + " — " + desk;
   if(inputId==="cariICD10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; }
+  if(inputId==="cariICD10Sekunder"){ document.getElementById("kodeICD10Sekunder").value = kode; document.getElementById("deskDiagSekunder").value = desk; }
   if(inputId==="cariICD9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; }
 }
 // Fallback offline ringkas untuk mode demo (database lengkap 7.433/3.979 kode ada di backend Apps Script)
@@ -1800,7 +1807,8 @@ async function pageRekamMedis(el){
       <button class="btn ghost" onclick="analisaKodeDariDiagnosa()">🔎 Analisa &amp; Cari Saran Kode ICD-10 / ICD-9 dari Kalimat Ini</button>
     </div>
     <div class="row" style="margin-top:10px">
-      <div><label>Saran Kode ICD-10 (Diagnosa)</label><div id="saranICD10DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
+      <div><label>Saran Kode ICD-10 (Diagnosa Utama)</label><div id="saranICD10DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
+      <div><label>Saran Kode ICD-10 (Diagnosa Sekunder)</label><div id="saranICD10SekunderDariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
       <div><label>Saran Kode ICD-9-CM (Tindakan)</label><div id="saranICD9DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
     </div>
     <p class="hint">💡 Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
@@ -1837,6 +1845,17 @@ async function pageRekamMedis(el){
         <div><label>Deskripsi Diagnosa</label><input id="deskDiag" placeholder="cth: Gastroenteritis akut"></div></div>
       <button class="btn" style="margin-top:10px" onclick="submitDiagnosa()">Tambah Diagnosa</button>
       <button class="btn ghost" id="btnBatalEditDiag" style="margin-top:10px;display:none" onclick="batalEditDiagnosa()">Batal Edit</button>
+    </div>
+    <div class="card">
+      <div class="section-title">Tambah Diagnosa Sekunder (ICD-10)</div>
+      <p class="hint">Khusus diagnosa penyerta/sekunder — bisa diklik berulang kali untuk menambahkan lebih dari satu, tidak perlu ganti-ganti dropdown "Jenis" seperti di kartu Diagnosa Utama di atas.</p>
+      <div style="position:relative;"><label>Cari Kode / Deskripsi ICD-10 (Sekunder)</label>
+        <input id="cariICD10Sekunder" placeholder="ketik kode atau nama diagnosa sekunder..." oninput="cariKode('cariICD10Sekunder','saranICD10Sekunder',searchICD10API)">
+        <div id="saranICD10Sekunder" class="suggest-box"></div>
+      </div>
+      <div class="row"><div><label>Kode ICD-10 (terpilih)</label><input id="kodeICD10Sekunder" placeholder="cth: E11.9"></div>
+        <div><label>Deskripsi Diagnosa</label><input id="deskDiagSekunder" placeholder="cth: Diabetes melitus tipe 2"></div></div>
+      <button class="btn" style="margin-top:10px" onclick="submitDiagnosaSekunder()">Tambah Diagnosa Sekunder</button>
     </div>
     <div class="card">
       <div class="section-title" id="tindakanFormTitle">Tambah Tindakan (ICD-9-CM)</div>
@@ -1960,6 +1979,18 @@ async function submitDiagnosa(){
     ? await api("diagnosa.edit", {id: editId, jenis:val("jenisDiag"), kodeICD10:val("kodeICD10"), deskripsi:val("deskDiag")}, "POST")
     : await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
   if(r.ok){ toast(editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"); batalEditDiagnosa(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
+}
+async function submitDiagnosaSekunder(){
+  const kode = val("kodeICD10Sekunder"), desk = val("deskDiagSekunder");
+  if(!kode){ toast("Pilih/isi dulu kode ICD-10 untuk diagnosa sekunder"); return; }
+  const r = await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:"Sekunder", JenisDiagnosa:"Sekunder", kodeICD10:kode, KodeICD10:kode, deskripsi:desk, Deskripsi:desk}, "POST");
+  if(r.ok){
+    toast("Diagnosa sekunder ditambahkan");
+    document.getElementById("cariICD10Sekunder").value = "";
+    document.getElementById("kodeICD10Sekunder").value = "";
+    document.getElementById("deskDiagSekunder").value = "";
+    await renderPertahankanAnalisaSaran();
+  } else { toast(r.msg || "Gagal menambahkan diagnosa sekunder"); }
 }
 function mulaiEditDiagnosa(x){
   document.getElementById("diagFormTitle").textContent = "Ubah Diagnosa";
@@ -2106,19 +2137,24 @@ async function kumpulkanSaranKode(kataKunci, searchFn){
 async function analisaKodeDariDiagnosa(){
   const teks = val("diagnosaMedisDokter");
   const box10 = document.getElementById("saranICD10DariDiagnosa");
+  const box10Sekunder = document.getElementById("saranICD10SekunderDariDiagnosa");
   const box9 = document.getElementById("saranICD9DariDiagnosa");
   if(!teks || teks.length < 3){ toast("Ketik dulu kalimat diagnosa dokter (minimal 3 huruf) untuk dianalisa"); return; }
   const kataKunci = ambilKataKunciDiagnosa(teks);
-  if(!kataKunci.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box9.innerHTML=""; return; }
+  if(!kataKunci.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
   toast("Menganalisa "+kataKunci.length+" kata kunci dari kalimat diagnosa...");
   const [saran10, saran9] = await Promise.all([ kumpulkanSaranKode(kataKunci, searchICD10API), kumpulkanSaranKode(kataKunci, searchICD9API) ]);
   const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} ${r.resmi ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
+  // Saran ICD-10 sama untuk kolom Utama & Sekunder (hasil analisa kata kunci
+  // yang sama) — bedanya cuma tujuan pengisian saat diklik.
   box10.innerHTML = saran10.length ? saran10.map(baris("icd10")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
+  box10Sekunder.innerHTML = saran10.length ? saran10.map(baris("icd10sekunder")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
   box9.innerHTML = saran9.length ? saran9.map(baris("icd9")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-9-CM yang cocok dengan kalimat ini</div>`;
   toast("Saran kode ditemukan — klik salah satu untuk mengisi otomatis (tetap cek ulang kecocokannya)");
 }
 function isiDariSaran(jenis, kode, desk){
   if(jenis==="icd10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; toast("Kode ICD-10 diisi: "+kode); }
+  if(jenis==="icd10sekunder"){ document.getElementById("kodeICD10Sekunder").value = kode; document.getElementById("deskDiagSekunder").value = desk; toast("Kode ICD-10 (sekunder) diisi: "+kode); }
   if(jenis==="icd9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; toast("Kode ICD-9-CM diisi: "+kode); }
 }
 async function analisaPrediksiCBGAwal(){
