@@ -197,6 +197,7 @@ const NAV = [
 {id:"laporanrl", label:"📊 Laporan RL", step:null},
 {id:"verifikasiklaim", label:"🔍 Verifikasi Klaim", step:null},
 {id:"pengadaanobat", label:"📦 Pengadaan & Distribusi Obat", step:null},
+{id:"clinicalpathway", label:"🛣️ Clinical Pathway", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -209,10 +210,10 @@ const ROLE_ACCESS = {
   // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
   // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
-  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi","verifikasiklaim"],
-  perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
-  kasir: ["dashboard","kunjungan","billing","penunjang","tarif","pengadaanobat"],
-verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan","verifikasiklaim"],
+  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi","verifikasiklaim","clinicalpathway"],
+  perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","clinicalpathway"],
+  kasir: ["dashboard","kunjungan","billing","penunjang","tarif","pengadaanobat","clinicalpathway"],
+verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan","verifikasiklaim","clinicalpathway"],
 };
 // Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
 // bisa mencentang modul satu per satu per staf lewat halaman "Kelola Hak
@@ -223,7 +224,7 @@ const MODUL_KE_NAV = {
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt","pengadaanobat"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
-  ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"], verifikasiklaim:["verifikasiklaim"]
+  ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"], verifikasiklaim:["verifikasiklaim"], clinicalpathway:["clinicalpathway"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -253,6 +254,7 @@ const DAFTAR_MODUL = [
   {id:"alatmedis", label:"Kalibrasi & Perawatan Alat Medis (kelola alat + catat kalibrasi)"},
   {id:"pelaporan", label:"Laporan RL untuk SIRS Online (lihat laporan RL3/RL4/RL5)"},
   {id:"verifikasiklaim", label:"Verifikasi Klaim — Skrining Risiko Upcoding (lihat & kelola hasil skrining klaim)"},
+  {id:"clinicalpathway", label:"Clinical Pathway (kelola template CP & checklist harian pasien; Unit Cost dikelola lewat modul Master Tarif)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -1007,7 +1009,7 @@ function render(){
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
     suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
     ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim,
-    pengadaanobat: pagePengadaanObat
+    pengadaanobat: pagePengadaanObat, clinicalpathway: pageClinicalPathway
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1580,6 +1582,7 @@ function pilihKode(inputId, boxId, kode, desk){
   if(inputId==="cariICD10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; }
   if(inputId==="cariICD10Sekunder"){ document.getElementById("kodeICD10Sekunder").value = kode; document.getElementById("deskDiagSekunder").value = desk; }
   if(inputId==="cariICD9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; }
+  if(inputId==="cpCariICD10"){ document.getElementById("cpKodeIcd10").value = kode; }
 }
 // Fallback offline ringkas untuk mode demo (database lengkap 7.433/3.979 kode ada di backend Apps Script)
 const ICD10_DEMO_FALLBACK = [
@@ -3025,11 +3028,14 @@ async function renderRekapTab(tab){
     body.innerHTML = `<p class="sub">Seluruh prediksi klaim dari semua kunjungan</p><div id="rekapList">Memuat...</div>`;
     const rows = await api("getRekapKlaim", {}, "GET");
     if(!rows.length){ document.getElementById("rekapList").innerHTML = `<div class="empty">Belum ada data klaim</div>`; return; }
-    document.getElementById("rekapList").innerHTML = `<table>
-      <tr><th>Kunjungan</th><th>Kode CBG</th><th>Severity</th><th>Kelas</th><th>Tarif Prediksi</th><th>Billing RS</th><th>Selisih</th></tr>
+    document.getElementById("rekapList").innerHTML = `<p class="hint">Kolom "Selisih" = Billing RS dikurangi Tarif Prediksi (RS membebankan biaya ke pasien lebih besar dari yang akan dibayar BPJS = berpotensi rugi kalau positif). Kolom "Unit Cost" &amp; "Selisih vs Unit Cost" BEDA konsepnya: Unit Cost = biaya riil produksi RS (diisi RS sendiri di menu Master Tarif &gt; Unit Cost), dan Selisih vs Unit Cost = Tarif Prediksi dikurangi Unit Cost (untung/rugi riil RS per kasus dari sisi BPJS membayar tarif itu) -- kalau belum diisi datanya, tampil "-".</p>
+    <table>
+      <tr><th>Kunjungan</th><th>Kode CBG</th><th>Severity</th><th>Kelas</th><th>Tarif Prediksi</th><th>Billing RS</th><th>Selisih</th><th>Unit Cost</th><th>Selisih vs Unit Cost</th></tr>
       ${rows.map(k=>`<tr><td>${k.KunjunganID}</td><td>${k.KodeCBGPrediksi}</td><td>${k.Severity}</td><td>${k.KelasRawat}</td>
         <td>Rp${Number(k.TarifPrediksi).toLocaleString('id-ID')}</td><td>Rp${Number(k.TotalBillingRS).toLocaleString('id-ID')}</td>
-        <td style="color:${Number(k.Selisih)>0?'var(--red)':'var(--teal-dk)'}">Rp${Number(k.Selisih).toLocaleString('id-ID')}</td></tr>`).join("")}
+        <td style="color:${Number(k.Selisih)>0?'var(--red)':'var(--teal-dk)'}">Rp${Number(k.Selisih).toLocaleString('id-ID')}</td>
+        <td>${k.UnitCost==null ? '-' : 'Rp'+Number(k.UnitCost).toLocaleString('id-ID')}</td>
+        <td style="color:${k.SelisihUnitCost==null ? 'inherit' : (Number(k.SelisihUnitCost)<0?'var(--red)':'var(--teal-dk)')}">${k.SelisihUnitCost==null ? '-' : 'Rp'+Number(k.SelisihUnitCost).toLocaleString('id-ID')}</td></tr>`).join("")}
     </table>`;
   } else if (tab === 'diagnosa') {
     body.innerHTML = `
@@ -4489,6 +4495,7 @@ async function pageTarif(el){
         <button class="btn" onclick="renderTarifTab('inap')">Rawat Inap</button>
         <button class="btn" onclick="renderTarifTab('jalan')">Rawat Jalan</button>
         ${Object.keys(TARIF_UNIT_LABEL).map(u=>`<button class="btn" onclick="renderTarifTab('${u}')">${TARIF_UNIT_LABEL[u]}</button>`).join("")}
+        <button class="btn" onclick="renderTarifTab('unitcost')">🏭 Unit Cost (Biaya Riil RS)</button>
         <button class="btn ghost" onclick="bukaFarmasiDariTarif()">💊 Harga Obat Farmasi →</button>
       </div>
       <div id="tarifBody"></div>
@@ -4543,7 +4550,76 @@ async function renderTarifTab(tab){
       <div id="tfList" style="margin-top:14px"></div>`;
     const rows = await api('tarif.listLayanan', {unit: tab}, 'POST');
     document.getElementById('tfList').innerHTML = renderTarifLayananList(rows, tab);
+  } else if (tab === 'unitcost') {
+    // Unit Cost = biaya riil RS per kode CBG, diisi manual dari studi biaya
+    // keuangan internal (BUKAN data resmi BPJS seperti tarif_cbg_referensi
+    // di atas) -- dipakai Rekap Klaim untuk menghitung Selisih vs Unit Cost
+    // (Tarif Prediksi INA-CBG dikurangi Unit Cost = untung/rugi riil per kasus).
+    body.innerHTML = `
+      <p class="hint">Isi angka biaya riil (obat+BHP+jasa+overhead dst) per kode CBG dari hasil studi biaya RS sendiri. Kelas Rawat Inap 1/2/3 dipakai untuk kasus Rawat Inap; kolom "RJ" dipakai untuk kasus Rawat Jalan. Kosongkan (0) kalau belum ada datanya -- Rekap Klaim akan menampilkan "-" untuk kode CBG yang belum diisi.</p>
+      <label>Kode CBG</label><input id="uc_kode" placeholder="cth: A-4-14-I (samakan dengan Kode CBG Prediksi di Rekap Klaim)">
+      <label>Deskripsi (opsional)</label><input id="uc_desk">
+      <div class="row">
+        <div><label>Unit Cost Kelas 1</label><input id="uc_k1" type="number"></div>
+        <div><label>Unit Cost Kelas 2</label><input id="uc_k2" type="number"></div>
+        <div><label>Unit Cost Kelas 3</label><input id="uc_k3" type="number"></div>
+        <div><label>Unit Cost Rawat Jalan</label><input id="uc_rj" type="number"></div>
+      </div>
+      <button class="btn" onclick="submitUnitCost()">Simpan</button>
+      <div id="ucList" style="margin-top:14px"></div>`;
+    await muatUnitCostList();
   }
+}
+async function muatUnitCostList(){
+  const rows = await api('unitCost.list', {}, 'POST');
+  window.__unitCostCache = rows || [];
+  const box = document.getElementById('ucList');
+  if(!box) return;
+  if(!rows || !rows.length){ box.innerHTML = '<p class="sub">Belum ada data Unit Cost.</p>'; return; }
+  box.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode CBG</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Deskripsi</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 1</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 2</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 3</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ</th><th></th></tr>' +
+    rows.map(r=>`<tr>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.kodeCbg)}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.deskripsi||'-')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.unitCostKelas1||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.unitCostKelas2||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.unitCostKelas3||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.unitCostRj||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick='ucEdit(${JSON.stringify(r.kodeCbg)})'>Edit</button>
+        <button class="btn sm danger" onclick="ucHapus('${r.kodeCbg.replace(/'/g,"\\'")}')">Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>';
+}
+function ucEdit(kodeCbg){
+  const r = (window.__unitCostCache||[]).find(x=>x.kodeCbg===kodeCbg);
+  if(!r) return;
+  document.getElementById('uc_kode').value = r.kodeCbg;
+  document.getElementById('uc_desk').value = r.deskripsi||'';
+  document.getElementById('uc_k1').value = r.unitCostKelas1||0;
+  document.getElementById('uc_k2').value = r.unitCostKelas2||0;
+  document.getElementById('uc_k3').value = r.unitCostKelas3||0;
+  document.getElementById('uc_rj').value = r.unitCostRj||0;
+  document.getElementById('uc_kode').scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function submitUnitCost(){
+  const kodeCbg = val('uc_kode');
+  if(!kodeCbg){ toast('Kode CBG wajib diisi'); return; }
+  const r = await api('unitCost.simpan', {
+    kodeCbg, deskripsi: val('uc_desk'),
+    unitCostKelas1: Number(val('uc_k1'))||0, unitCostKelas2: Number(val('uc_k2'))||0,
+    unitCostKelas3: Number(val('uc_k3'))||0, unitCostRj: Number(val('uc_rj'))||0
+  }, 'POST');
+  if(r.ok){ toast('Unit Cost tersimpan'); document.getElementById('uc_kode').value=''; document.getElementById('uc_desk').value='';
+    document.getElementById('uc_k1').value=''; document.getElementById('uc_k2').value=''; document.getElementById('uc_k3').value=''; document.getElementById('uc_rj').value='';
+    await muatUnitCostList();
+  } else toast(r.msg || 'Gagal menyimpan');
+}
+async function ucHapus(kodeCbg){
+  if(!confirm(`Hapus Unit Cost untuk kode CBG "${kodeCbg}"?`)) return;
+  const r = await api('unitCost.hapus', {kodeCbg}, 'POST');
+  toast(r.ok ? 'Dihapus' : (r.msg||'Gagal menghapus'));
+  if(r.ok) await muatUnitCostList();
 }
 function renderTarifLayananList(rows, tab){
   if(!rows || !rows.length) return '<p class="sub">Belum ada tarif untuk unit ini.</p>';
@@ -5802,6 +5878,349 @@ async function muatRekapPemakaian(){
   if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Tidak ada data pemakaian pada rentang ini.</div>'; return; }
   box.innerHTML = `<table><tr><th>Obat</th><th>Total Keluar</th><th>Untuk Resep Pasien</th><th>Untuk Distribusi Unit</th></tr>
     ${rows.map(x=>`<tr><td>${esc(x.namaObat)}</td><td>${x.totalKeluar} ${x.satuan||''}</td><td>${x.keluarResep||0}</td><td>${x.keluarDistribusi||0}</td></tr>`).join("")}
+  </table>`;
+}
+
+/* ================= CLINICAL PATHWAY (checklist per hari rawat) + pembiayaan berbasis CP ================= */
+const CP_KATEGORI = ['Asesmen','Laboratorium','Radiologi','Obat','Tindakan','Gizi','Edukasi','Mobilisasi','Kriteria Pulang','Lainnya'];
+
+async function pageClinicalPathway(el){
+  el.innerHTML = `<h1>🛣️ Clinical Pathway</h1>
+    <p class="sub">Checklist standar pelayanan per hari rawat berdasarkan diagnosa (manual, ditandai staf sendiri — tidak otomatis mengecek data diagnosa/tindakan/lab/obat lain), dan pembiayaan (estimasi vs riil) berdasarkan Clinical Pathway yang dipakai. Isi &amp; sahkan template dulu di tab "Template CP", baru bisa diterapkan ke pasien di tab "Terapkan &amp; Checklist Pasien". Data Unit Cost (biaya riil RS per kode CBG) dikelola di menu 💰 Master Tarif &gt; tab Unit Cost.</p>
+    <div class="card">
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+        <button class="btn" onclick="renderCpTab('template')">📋 Template CP</button>
+        <button class="btn" onclick="renderCpTab('terapkan')">✅ Terapkan &amp; Checklist Pasien</button>
+        <button class="btn" onclick="renderCpTab('rekap')">📊 Rekap Kepatuhan &amp; Biaya</button>
+      </div>
+      <div id="cpBody">Memuat...</div>
+    </div>`;
+  renderCpTab('template');
+}
+
+function cpBolehKelola(){
+  if(!state.user) return false;
+  return state.user.role === 'admin' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('clinicalpathway');
+}
+
+/* ---------- Tab: Template CP ---------- */
+window.__cpHariBuilder = [];
+window.__cpEditingId = null;
+async function renderCpTab(tab){
+  window.__cpActiveTab = tab;
+  const body = document.getElementById('cpBody');
+  if(tab === 'template'){
+    const boleh = cpBolehKelola();
+    body.innerHTML = `
+      ${boleh ? `<div class="card" style="margin-bottom:14px">
+        <div class="section-title" id="cpFormTitle">Tambah Template CP Baru</div>
+        <input type="hidden" id="cpEditId">
+        <div class="row">
+          <div style="position:relative;"><label>Cari Kode ICD-10 (diagnosa yang dituju CP ini)</label>
+            <input id="cpCariICD10" placeholder="ketik kode atau nama diagnosa..." oninput="cariKode('cpCariICD10','cpSaranICD10',searchICD10API)">
+            <div id="cpSaranICD10" class="suggest-box"></div>
+          </div>
+          <div><label>Kode ICD-10 (terpilih)</label><input id="cpKodeIcd10" placeholder="cth: A01.0"></div>
+        </div>
+        <label>Nama Clinical Pathway</label><input id="cpNamaCp" placeholder="cth: CP Demam Tifoid Dewasa Tanpa Komplikasi">
+        <label>Deskripsi (opsional)</label><input id="cpDeskripsi">
+        <div class="row">
+          <div><label>Lama Hari Standar</label><input id="cpLamaHari" type="number" value="1" min="1"></div>
+          <div><label>Estimasi Biaya Standar (Rp)</label><input id="cpEstimasiBiaya" type="number" value="0"></div>
+        </div>
+        <div class="section-title" style="margin-top:14px">Rencana Kegiatan per Hari</div>
+        <div class="row">
+          <div><label>Hari ke-</label><input id="cpItemHari" type="number" value="1" min="1"></div>
+          <div><label>Kategori</label><select id="cpItemKategori">${CP_KATEGORI.map(k=>`<option>${k}</option>`).join("")}</select></div>
+          <div><label>Rencana Kegiatan</label><input id="cpItemRencana" placeholder="cth: Cek darah lengkap, DPL, Widal"></div>
+        </div>
+        <button class="btn sm" onclick="tambahItemCpBuilder()">+ Tambah ke Daftar</button>
+        <div id="cpBuilderList" style="margin-top:10px"></div>
+        <button class="btn" style="margin-top:12px" onclick="submitTemplateCp()">Simpan Template</button>
+        <button class="btn ghost" style="margin-top:12px" onclick="batalEditTemplateCp()">Batal / Bersihkan Form</button>
+      </div>` : ''}
+      <div id="cpTemplateList">Memuat...</div>`;
+    if(boleh) renderCpBuilderList();
+    await muatCpTemplateList();
+  } else if(tab === 'terapkan'){
+    body.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <label>Cari Kunjungan (No. RM / Nama pasien)</label>
+        <input id="cpCariKunjungan" placeholder="ketik untuk mencari kunjungan aktif..." oninput="debounceCariKunjunganCp()">
+        <div id="cpHasilCariKunjungan" style="margin-top:8px"></div>
+      </div>
+      <div id="cpKunjunganTerpilihBox"></div>`;
+  } else if(tab === 'rekap'){
+    body.innerHTML = `<div id="cpRekapBox">Memuat...</div>`;
+    await muatCpRekap();
+  }
+}
+
+function tambahItemCpBuilder(){
+  const hariKe = Number(val('cpItemHari'))||1;
+  const kategori = document.getElementById('cpItemKategori').value;
+  const rencana = val('cpItemRencana');
+  if(!rencana){ toast('Isi rencana kegiatan dulu'); return; }
+  window.__cpHariBuilder.push({hariKe, kategori, rencana});
+  document.getElementById('cpItemRencana').value = '';
+  renderCpBuilderList();
+}
+function hapusItemCpBuilder(idx){ window.__cpHariBuilder.splice(idx,1); renderCpBuilderList(); }
+function renderCpBuilderList(){
+  const box = document.getElementById('cpBuilderList'); if(!box) return;
+  const items = window.__cpHariBuilder;
+  if(!items.length){ box.innerHTML = '<p class="sub">Belum ada rencana kegiatan ditambahkan.</p>'; return; }
+  const byHari = {};
+  items.forEach((it,idx)=>{ (byHari[it.hariKe] = byHari[it.hariKe]||[]).push({...it, idx}); });
+  box.innerHTML = Object.keys(byHari).sort((a,b)=>a-b).map(h=>`
+    <div style="margin-bottom:8px"><b>Hari ke-${h}</b>
+    ${byHari[h].map(it=>`<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center">
+      <span><span class="badge muted">${esc(it.kategori)}</span> ${esc(it.rencana)}</span>
+      <button class="btn sm danger" onclick="hapusItemCpBuilder(${it.idx})">Hapus</button>
+    </div>`).join("")}</div>`).join("");
+}
+function batalEditTemplateCp(){
+  window.__cpEditingId = null; window.__cpHariBuilder = [];
+  document.getElementById('cpEditId').value = '';
+  document.getElementById('cpFormTitle').textContent = 'Tambah Template CP Baru';
+  ['cpCariICD10','cpKodeIcd10','cpNamaCp','cpDeskripsi'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cpLamaHari').value = 1;
+  document.getElementById('cpEstimasiBiaya').value = 0;
+  renderCpBuilderList();
+}
+async function submitTemplateCp(){
+  const namaCp = val('cpNamaCp');
+  if(!namaCp){ toast('Nama Clinical Pathway wajib diisi'); return; }
+  if(!window.__cpHariBuilder.length){ toast('Minimal satu rencana kegiatan harus ditambahkan'); return; }
+  const payload = {
+    id: window.__cpEditingId || undefined,
+    kodeIcd10: val('cpKodeIcd10'), namaCp, deskripsi: val('cpDeskripsi'),
+    lamaHariStandar: Number(val('cpLamaHari'))||1, estimasiBiayaStandar: Number(val('cpEstimasiBiaya'))||0,
+    hari: window.__cpHariBuilder
+  };
+  const r = await api('cp.templateSimpan', payload, 'POST');
+  if(r.ok){ toast('Template Clinical Pathway tersimpan'); batalEditTemplateCp(); await muatCpTemplateList(); }
+  else toast(r.msg || 'Gagal menyimpan');
+}
+async function muatCpTemplateList(){
+  const rows = await api('cp.templateList', {}, 'POST');
+  window.__cpTemplateCache = rows || [];
+  const box = document.getElementById('cpTemplateList'); if(!box) return;
+  const boleh = cpBolehKelola();
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada Template Clinical Pathway.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Nama CP</th><th>ICD-10</th><th>Lama Hari</th><th>Estimasi Biaya</th><th>Sumber</th><th>Status</th><th></th></tr>
+    ${rows.map(t=>`<tr${t.aktif===false?' style="color:var(--muted)"':''}>
+      <td>${esc(t.namaCp)}</td>
+      <td>${t.kodeIcd10 ? esc(t.kodeIcd10)+' — '+esc(t.deskripsiIcd10||'') : '-'}</td>
+      <td>${t.lamaHariStandar} hari (${t.jumlahItem} item)</td>
+      <td>Rp${Number(t.estimasiBiayaStandar||0).toLocaleString('id-ID')}</td>
+      <td>${t.sumber==='ppk_rs' ? '<span class="badge ok">✅ Disahkan PPK RS</span>' : '<span class="badge warn">⚠️ Draf (belum disahkan)</span>'}</td>
+      <td>${t.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="lihatDetailTemplateCp('${t.id}')">Detail</button>
+        ${boleh ? `<button class="btn sm ghost" onclick="mulaiEditTemplateCp('${t.id}')">Edit</button>` : ''}
+        ${boleh && t.sumber!=='ppk_rs' ? `<button class="btn sm" onclick="submitSahkanTemplateCp('${t.id}')">Sahkan</button>` : ''}
+        ${boleh ? `<button class="btn sm ghost" onclick="submitSetAktifTemplateCp('${t.id}',${t.aktif===false})">${t.aktif===false?'Aktifkan':'Nonaktifkan'}</button>` : ''}
+        ${boleh ? `<button class="btn sm danger" onclick="submitHapusTemplateCp('${t.id}')">Hapus</button>` : ''}
+      </td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function lihatDetailTemplateCp(id){
+  const r = await api('cp.templateDetail', {id}, 'POST');
+  if(!r.ok){ toast(r.msg||'Gagal memuat detail'); return; }
+  const h = r.header;
+  const backdrop = document.createElement('div'); backdrop.className='modal-backdrop';
+  backdrop.setAttribute('onclick',"if(event.target===this) this.remove()");
+  backdrop.innerHTML = `<div class="card" style="max-width:640px;width:100%">
+    <h3>${esc(h.namaCp)}</h3>
+    <p class="sub">${h.kodeIcd10 ? esc(h.kodeIcd10)+' — '+esc(h.deskripsiIcd10||'') : 'Tanpa kode ICD-10'} · ${h.lamaHariStandar} hari standar · Estimasi Rp${Number(h.estimasiBiayaStandar||0).toLocaleString('id-ID')}</p>
+    ${h.deskripsi ? `<p>${esc(h.deskripsi)}</p>` : ''}
+    ${h.sumber!=='ppk_rs' ? '<div class="flag-item warn">⚠️ Ini masih draf — belum disahkan komite PPK/dokter, wajib direview dulu sebelum dipakai rutin.</div>' : ''}
+    <table style="margin-top:10px"><tr><th>Hari</th><th>Kategori</th><th>Rencana Kegiatan</th></tr>
+      ${(r.hari||[]).map(x=>`<tr><td>${x.hariKe}</td><td>${esc(x.kategori)}</td><td>${esc(x.rencana)}</td></tr>`).join("")}
+    </table>
+    <div style="margin-top:16px;text-align:right"><button class="btn ghost" onclick="this.closest('.modal-backdrop').remove()">Tutup</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+}
+async function mulaiEditTemplateCp(id){
+  const r = await api('cp.templateDetail', {id}, 'POST');
+  if(!r.ok){ toast(r.msg||'Gagal memuat detail'); return; }
+  window.__cpEditingId = id;
+  window.__cpHariBuilder = (r.hari||[]).map(x=>({hariKe:x.hariKe, kategori:x.kategori, rencana:x.rencana}));
+  document.getElementById('cpEditId').value = id;
+  document.getElementById('cpFormTitle').textContent = 'Ubah Template CP: ' + r.header.namaCp;
+  document.getElementById('cpKodeIcd10').value = r.header.kodeIcd10 || '';
+  document.getElementById('cpCariICD10').value = r.header.kodeIcd10 ? (r.header.kodeIcd10+' — '+(r.header.deskripsiIcd10||'')) : '';
+  document.getElementById('cpNamaCp').value = r.header.namaCp;
+  document.getElementById('cpDeskripsi').value = r.header.deskripsi || '';
+  document.getElementById('cpLamaHari').value = r.header.lamaHariStandar;
+  document.getElementById('cpEstimasiBiaya').value = r.header.estimasiBiayaStandar;
+  if(r.header.sumber==='ppk_rs') toast('⚠️ Template ini sudah disahkan — kalau disimpan setelah diubah, statusnya akan kembali jadi draf & perlu disahkan ulang');
+  renderCpBuilderList();
+  document.getElementById('cpFormTitle').scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function submitSahkanTemplateCp(id){
+  if(!confirm('Sahkan Clinical Pathway ini sebagai PPK RS resmi? Pastikan sudah direview dokter/komite PPK terkait.')) return;
+  const r = await api('cp.templateSahkan', {id}, 'POST');
+  toast(r.ok ? (r.msg||'Disahkan') : (r.msg||'Gagal'));
+  if(r.ok) await muatCpTemplateList();
+}
+async function submitSetAktifTemplateCp(id, aktifBaru){
+  const r = await api('cp.templateSetAktif', {id, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru?'Template diaktifkan kembali':'Template dinonaktifkan') : (r.msg||'Gagal'));
+  if(r.ok) await muatCpTemplateList();
+}
+async function submitHapusTemplateCp(id){
+  if(!confirm('Hapus permanen template ini? Hanya berhasil kalau belum pernah diterapkan ke pasien manapun.')) return;
+  const r = await api('cp.templateHapus', {id}, 'POST');
+  toast(r.ok ? (r.msg||'Dihapus') : (r.msg||'Gagal menghapus'));
+  if(r.ok) await muatCpTemplateList();
+}
+
+/* ---------- Tab: Terapkan ke Pasien & Checklist ---------- */
+let _cpKjDebounce;
+function debounceCariKunjunganCp(){
+  clearTimeout(_cpKjDebounce);
+  _cpKjDebounce = setTimeout(cariKunjunganCp, 350);
+}
+async function cariKunjunganCp(){
+  const q = val('cpCariKunjungan');
+  const box = document.getElementById('cpHasilCariKunjungan');
+  if(q.length < 2){ box.innerHTML=''; return; }
+  const rows = await api('getKunjunganAktif', {q}, 'GET');
+  window.__cpKunjunganCache = rows || [];
+  if(!rows.length){ box.innerHTML = '<p class="sub">Tidak ada kunjungan aktif yang cocok.</p>'; return; }
+  box.innerHTML = rows.map(k=>`<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center">
+    <span>${esc(k.rm||k.RM)} — ${esc(k.nama||k.Nama||'-')} (${esc(k.jenisKunjungan||k.JenisKunjungan)}, ${esc(k.poliRuangan||k.PoliRuangan||'-')})</span>
+    <button class="btn sm" onclick="pilihKunjunganCp('${k.KunjunganID}')">Pilih →</button>
+  </div>`).join("");
+}
+async function pilihKunjunganCp(kunjunganId){
+  window.__cpKunjunganTerpilih = kunjunganId;
+  document.getElementById('cpCariKunjungan').value = '';
+  document.getElementById('cpHasilCariKunjungan').innerHTML = '';
+  await renderCpKunjunganTerpilih();
+}
+async function renderCpKunjunganTerpilih(){
+  const kunjunganId = window.__cpKunjunganTerpilih;
+  const box = document.getElementById('cpKunjunganTerpilihBox');
+  if(!kunjunganId){ box.innerHTML=''; return; }
+  const k = (window.__cpKunjunganCache||[]).find(x=>x.KunjunganID===kunjunganId);
+  const boleh = cpBolehKelola();
+  const daftar = await api('cp.daftarPenerapanKunjungan', {kunjunganId}, 'POST');
+  const adaAktif = (daftar||[]).some(d=>d.status==='Aktif');
+  const templatesAktif = (await api('cp.templateList', {hanyaAktif:true}, 'POST')).filter(t=>t.aktif!==false);
+  box.innerHTML = `<div class="card">
+      <h3>Kunjungan Terpilih${k ? ': '+esc(k.nama||k.Nama||'-')+' ('+esc(k.rm||k.RM)+')' : ' ('+esc(kunjunganId)+')'}</h3>
+      ${boleh && !adaAktif ? `<div class="row" style="align-items:flex-end">
+        <div><label>Terapkan Template CP</label>
+          <select id="cpTerapkanTemplateId"><option value="">Pilih template...</option>
+            ${templatesAktif.map(t=>`<option value="${t.id}">${esc(t.namaCp)} (${t.sumber==='ppk_rs'?'Disahkan':'Draf'})</option>`).join("")}
+          </select>
+        </div>
+        <div><label>Tanggal Mulai</label><input id="cpTerapkanTanggal" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div><button class="btn" onclick="submitTerapkanCp('${kunjunganId}')">Terapkan</button></div>
+      </div>` : (adaAktif ? '<p class="hint">Kunjungan ini sudah punya Clinical Pathway yang sedang Aktif — selesaikan/hentikan dulu sebelum menerapkan yang baru.</p>' : '')}
+      <div id="cpDaftarPenerapan" style="margin-top:12px"></div>
+    </div>`;
+  renderCpDaftarPenerapan(daftar||[]);
+}
+function renderCpDaftarPenerapan(daftar){
+  const box = document.getElementById('cpDaftarPenerapan'); if(!box) return;
+  if(!daftar.length){ box.innerHTML = '<p class="sub">Belum ada Clinical Pathway yang diterapkan ke kunjungan ini.</p>'; return; }
+  box.innerHTML = daftar.map(d=>`<div class="card" style="margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div><b>${esc(d.namaCp)}</b> ${d.sumberTemplate!=='ppk_rs'?'<span class="badge warn">Draf</span>':''}
+        <div class="sub">Mulai ${new Date(d.tanggalMulai).toLocaleDateString('id-ID')} · ${d.jumlahSesuai}/${d.jumlahItem} Sesuai, ${d.jumlahVarian} Varian</div>
+      </div>
+      <div>${d.status==='Aktif'?'<span class="badge ok">Aktif</span>':(d.status==='Selesai'?'<span class="badge ok">Selesai</span>':'<span class="badge danger">Dihentikan</span>')}</div>
+    </div>
+    ${d.alasanBerhenti ? `<p class="hint">Alasan dihentikan: ${esc(d.alasanBerhenti)}</p>` : ''}
+    <button class="btn sm" onclick="bukaChecklistCp('${d.id}')">Buka Checklist</button>
+  </div>`).join("") + '<div id="cpChecklistBox"></div>';
+}
+async function bukaChecklistCp(penerapanId){
+  const r = await api('cp.detailPenerapan', {id: penerapanId}, 'POST');
+  if(!r.ok){ toast(r.msg||'Gagal memuat checklist'); return; }
+  window.__cpChecklistDetail = r;
+  renderChecklistCpBox();
+}
+function renderChecklistCpBox(){
+  const r = window.__cpChecklistDetail;
+  const box = document.getElementById('cpChecklistBox'); if(!box || !r) return;
+  const h = r.header;
+  const boleh = cpBolehKelola();
+  box.innerHTML = `<div class="card">
+    <h3>Checklist: ${esc(h.namaCp)}</h3>
+    <p class="sub">Estimasi Biaya Standar CP: Rp${Number(h.estimasiBiayaStandar||0).toLocaleString('id-ID')} · Total Billing Saat Ini: Rp${Number(h.totalBillingSaatIni||0).toLocaleString('id-ID')}</p>
+    <table><tr><th>Hari</th><th>Kategori</th><th>Rencana</th><th>Status</th><th>Catatan Varian</th>${boleh && h.status==='Aktif' ? '<th></th>' : ''}</tr>
+      ${(r.checklist||[]).map(c=>`<tr>
+        <td>${c.hariKe}</td><td>${esc(c.kategori)}</td><td>${esc(c.rencana)}</td>
+        <td>${c.status==='Sesuai'?'<span class="badge ok">Sesuai</span>':(c.status==='Varian'?'<span class="badge warn">Varian</span>':'<span class="badge muted">Belum</span>')}</td>
+        <td>${esc(c.catatanVarian||'-')}</td>
+        ${boleh && h.status==='Aktif' ? `<td style="white-space:nowrap">
+          <button class="btn sm ghost" onclick="submitRealisasiCp('${c.realisasiId}','Sesuai')">✔ Sesuai</button>
+          <button class="btn sm ghost" onclick="promptVarianCp('${c.realisasiId}')">⚠ Varian</button>
+        </td>` : ''}
+      </tr>`).join("")}
+    </table>
+    ${boleh && h.status==='Aktif' ? `<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn" onclick="submitSelesaikanCp('${h.id}')">Tandai Selesai</button>
+      <button class="btn danger" onclick="promptHentikanCp('${h.id}')">Hentikan</button>
+    </div>` : ''}
+  </div>`;
+}
+async function submitRealisasiCp(realisasiId, status){
+  const r = await api('cp.realisasiTandai', {realisasiId, status}, 'POST');
+  if(r.ok){ await bukaChecklistCp(window.__cpChecklistDetail.header.id); await renderCpKunjunganTerpilih(); }
+  else toast(r.msg||'Gagal menyimpan');
+}
+async function promptVarianCp(realisasiId){
+  const catatan = prompt('Catatan Varian (alasan penyimpangan dari rencana CP) — wajib diisi:');
+  if(catatan === null) return;
+  if(!catatan.trim()){ toast('Catatan varian wajib diisi'); return; }
+  const r = await api('cp.realisasiTandai', {realisasiId, status:'Varian', catatanVarian: catatan.trim()}, 'POST');
+  if(r.ok){ await bukaChecklistCp(window.__cpChecklistDetail.header.id); await renderCpKunjunganTerpilih(); }
+  else toast(r.msg||'Gagal menyimpan');
+}
+async function submitTerapkanCp(kunjunganId){
+  const templateId = document.getElementById('cpTerapkanTemplateId').value;
+  if(!templateId){ toast('Pilih template CP dulu'); return; }
+  const tanggalMulai = val('cpTerapkanTanggal');
+  const r = await api('cp.terapkan', {kunjunganId, templateId, tanggalMulai}, 'POST');
+  if(r.ok){ toast(r.msg||'Clinical Pathway diterapkan'); await renderCpKunjunganTerpilih(); }
+  else toast(r.msg||'Gagal menerapkan');
+}
+async function submitSelesaikanCp(id){
+  if(!confirm('Tandai Clinical Pathway ini Selesai?')) return;
+  const r = await api('cp.selesaikanPenerapan', {id}, 'POST');
+  toast(r.ok ? (r.msg||'Selesai') : (r.msg||'Gagal'));
+  if(r.ok){ window.__cpChecklistDetail = null; await renderCpKunjunganTerpilih(); }
+}
+async function promptHentikanCp(id){
+  const alasan = prompt('Alasan penghentian Clinical Pathway (wajib diisi):');
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast('Alasan wajib diisi'); return; }
+  const r = await api('cp.hentikanPenerapan', {id, alasan: alasan.trim()}, 'POST');
+  toast(r.ok ? (r.msg||'Dihentikan') : (r.msg||'Gagal'));
+  if(r.ok){ window.__cpChecklistDetail = null; await renderCpKunjunganTerpilih(); }
+}
+
+/* ---------- Tab: Rekap Kepatuhan & Biaya ---------- */
+async function muatCpRekap(){
+  const box = document.getElementById('cpRekapBox');
+  const rows = await api('cp.rekapKepatuhan', {}, 'POST');
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada data penerapan Clinical Pathway.</div>'; return; }
+  box.innerHTML = `<p class="hint">"Selisih vs Estimasi" = rata-rata Billing RS riil pasien yang memakai CP ini dikurangi Estimasi Biaya Standar CP -- positif berarti realisasi biaya lebih besar dari estimasi (perlu ditelusuri penyebabnya), negatif berarti lebih hemat dari estimasi.</p>
+  <table><tr><th>Nama CP</th><th>Lama Hari Standar</th><th>Jumlah Diterapkan</th><th>Selesai</th><th>Dihentikan</th><th>% Kepatuhan</th><th>Estimasi Biaya</th><th>Rata² Billing Riil</th><th>Selisih vs Estimasi</th></tr>
+    ${rows.map(x=>`<tr><td>${esc(x.namaCp)}</td><td>${x.lamaHariStandar}</td><td>${x.jumlahPenerapan}</td><td>${x.jumlahSelesai}</td><td>${x.jumlahDihentikan}</td>
+      <td>${x.persenKepatuhan==null?'-':x.persenKepatuhan+'%'}</td>
+      <td>Rp${Number(x.estimasiBiayaStandar||0).toLocaleString('id-ID')}</td>
+      <td>Rp${Number(x.rataRataBillingRiil||0).toLocaleString('id-ID')}</td>
+      <td style="color:${Number(x.selisihVsEstimasi)>0?'var(--red)':'var(--teal-dk)'}">Rp${Number(x.selisihVsEstimasi||0).toLocaleString('id-ID')}</td>
+    </tr>`).join("")}
   </table>`;
 }
 
