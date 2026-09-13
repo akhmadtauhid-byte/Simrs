@@ -1018,10 +1018,14 @@ async function renderPertahankanAnalisaSaran(){
   const elSaran10 = document.getElementById("saranICD10DariDiagnosa");
   const elSaran10Sekunder = document.getElementById("saranICD10SekunderDariDiagnosa");
   const elSaran9 = document.getElementById("saranICD9DariDiagnosa");
+  const elRekomKode = document.getElementById("rekomKodeICD10");
+  const elHasilRekom = document.getElementById("hasilRekomendasiPenunjang");
   const teksSekarang = elTeks ? elTeks.value : null;
   const saran10Sekarang = elSaran10 ? elSaran10.innerHTML : null;
   const saran10SekunderSekarang = elSaran10Sekunder ? elSaran10Sekunder.innerHTML : null;
   const saran9Sekarang = elSaran9 ? elSaran9.innerHTML : null;
+  const rekomKodeSekarang = elRekomKode ? elRekomKode.value : null;
+  const hasilRekomSekarang = elHasilRekom ? elHasilRekom.innerHTML : null;
   await render();
   if(teksSekarang !== null){
     const elTeksBaru = document.getElementById("diagnosaMedisDokter");
@@ -1038,6 +1042,16 @@ async function renderPertahankanAnalisaSaran(){
   if(saran9Sekarang !== null){
     const elSaran9Baru = document.getElementById("saranICD9DariDiagnosa");
     if(elSaran9Baru) elSaran9Baru.innerHTML = saran9Sekarang;
+  }
+  if(rekomKodeSekarang){
+    const elRekomKodeBaru = document.getElementById("rekomKodeICD10");
+    if(elRekomKodeBaru){
+      elRekomKodeBaru.value = rekomKodeSekarang;
+      if(hasilRekomSekarang !== null){
+        const elHasilRekomBaru = document.getElementById("hasilRekomendasiPenunjang");
+        if(elHasilRekomBaru) elHasilRekomBaru.innerHTML = hasilRekomSekarang;
+      }
+    }
   }
 }
 /*
@@ -1880,6 +1894,25 @@ async function pageRekamMedis(el){
     <button class="btn ghost" onclick="analisaPrediksiCBGAwal()">🔮 Lihat Perkiraan Kode CBG Sekarang</button>
     <div id="hasilCbgAwal" style="margin-top:12px"></div>
   </div>
+  <div class="section-title">💡 Rekomendasi Penunjang Berdasarkan Diagnosa</div>
+  <div class="card">
+    <p class="hint">Bantu kelengkapan alur pemeriksaan (farmasi/laboratorium/radiologi/gizi) supaya lebih sesuai kebiasaan verifikasi klaim BPJS (Vedika). Dua sumber: (1) <b>riwayat pasien lain dengan diagnosa sama di RS ini</b> — murni statistik data RS sendiri, dan (2) <b>Template PPK</b> yang dikelola dokter/rekam medis RS — beberapa berisi draf awal dari AI yang <b>wajib direview & disahkan dulu</b> sebelum dipakai untuk keputusan klinis atau klaim, ditandai jelas dengan lencana kuning.</p>
+    ${d.diagnosa.length ? `
+    <label>Pilih Diagnosa</label>
+    <select id="rekomKodeICD10" onchange="muatRekomendasiPenunjang()">
+      <option value="">-- pilih diagnosa yang sudah tercatat --</option>
+      ${(() => {
+        const sudahAda = new Set();
+        return d.diagnosa.filter(x=>{
+          const k = x.kodeICD10||x.KodeICD10;
+          if(sudahAda.has(k)) return false;
+          sudahAda.add(k); return true;
+        }).map(x=>`<option value="${x.kodeICD10||x.KodeICD10}">${x.kodeICD10||x.KodeICD10} — ${x.deskripsi||x.Deskripsi}</option>`).join("");
+      })()}
+    </select>
+    <div id="hasilRekomendasiPenunjang" style="margin-top:12px"></div>
+    ` : `<p class="hint">Tambahkan diagnosa dulu di atas untuk melihat rekomendasi penunjang.</p>`}
+  </div>
   <div class="grid" style="display:none"></div>
   ${((d.labHasil&&d.labHasil.length) || (d.radHasil&&d.radHasil.length)) ? `
   <div class="section-title">Hasil Lab &amp; Radiologi</div>
@@ -2156,6 +2189,90 @@ function isiDariSaran(jenis, kode, desk){
   if(jenis==="icd10"){ document.getElementById("kodeICD10").value = kode; document.getElementById("deskDiag").value = desk; toast("Kode ICD-10 diisi: "+kode); }
   if(jenis==="icd10sekunder"){ document.getElementById("kodeICD10Sekunder").value = kode; document.getElementById("deskDiagSekunder").value = desk; toast("Kode ICD-10 (sekunder) diisi: "+kode); }
   if(jenis==="icd9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; toast("Kode ICD-9-CM diisi: "+kode); }
+}
+// ================== REKOMENDASI PENUNJANG (farmasi/lab/radiologi/gizi) BERDASARKAN DIAGNOSA ==================
+async function muatRekomendasiPenunjang(){
+  const kode = val("rekomKodeICD10");
+  const box = document.getElementById("hasilRekomendasiPenunjang");
+  if(!box) return;
+  if(!kode){ box.innerHTML = ""; return; }
+  box.innerHTML = `<p class="hint">Memuat...</p>`;
+  const [riwayat, template] = await Promise.all([
+    api("rekomendasi.riwayat", {kodeICD10: kode}, "GET"),
+    api("rekomendasi.templateList", {kodeICD10: kode}, "GET")
+  ]);
+  const bolehKelolaPPK = state.user && (state.user.role === 'admin' || state.user.role === 'rekam_medis');
+  const renderRiwayatList = (label, arr) => {
+    if(!arr || !arr.length) return `<p class="hint">${label}: belum ada riwayat</p>`;
+    return `<div style="margin-bottom:8px"><b>${label}</b><ul style="margin:4px 0 0 18px;padding:0">${arr.map(x=>`<li>${x.nama}${x.kode?(' ('+x.kode+')'):''} — ${x.jumlah}x</li>`).join("")}</ul></div>`;
+  };
+  let htmlRiwayat = "";
+  if(riwayat && riwayat.ok){
+    const kosong = !(riwayat.obat||[]).length && !(riwayat.lab||[]).length && !(riwayat.radiologi||[]).length && !(riwayat.gizi||[]).length && !(riwayat.tindakanLain||[]).length;
+    htmlRiwayat = `<div class="section-title" style="font-size:14px">📊 Riwayat Pasien Serupa di RS Ini</div>`;
+    if(kosong){
+      htmlRiwayat += `<p class="hint">Belum ada riwayat pasien lain dengan diagnosa ini di RS Anda.</p>`;
+    } else {
+      htmlRiwayat +=
+        renderRiwayatList("Obat", riwayat.obat) +
+        renderRiwayatList("Laboratorium", riwayat.lab) +
+        renderRiwayatList("Radiologi", riwayat.radiologi) +
+        renderRiwayatList("Gizi", riwayat.gizi) +
+        renderRiwayatList("Tindakan Lain (ICD-9)", riwayat.tindakanLain);
+    }
+  } else {
+    htmlRiwayat = `<div class="section-title" style="font-size:14px">📊 Riwayat Pasien Serupa di RS Ini</div><p class="hint">Gagal memuat riwayat.</p>`;
+  }
+  let htmlTemplate = `<div class="section-title" style="font-size:14px">📋 Template PPK</div>`;
+  if(template && template.length){
+    htmlTemplate += template.map(t=>`<div class="suggest-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div><b>[${t.kategori}]</b> ${t.namaItem||t.nama_item} ${(t.catatan)?('<br><span class="hint">'+t.catatan+'</span>'):''}
+        ${t.disahkan ? '<span class="badge ok" style="margin-left:6px">✅ PPK RS</span>' : '<span class="badge" style="margin-left:6px;background:#fff3cd;color:#856404">🤖 Draf AI — Wajib Direview</span>'}
+      </div>
+      ${bolehKelolaPPK ? `<div style="white-space:nowrap">
+        ${!t.disahkan ? `<button class="btn sm ghost" onclick="sahkanTemplatePenunjang('${t.id}')">Sahkan</button>` : ""}
+        <button class="btn sm danger" onclick="hapusTemplatePenunjang('${t.id}')">Hapus</button>
+      </div>` : ""}
+    </div>`).join("");
+  } else {
+    htmlTemplate += `<p class="hint">Belum ada Template PPK untuk diagnosa ini.</p>`;
+  }
+  if(bolehKelolaPPK){
+    htmlTemplate += `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      <label>Tambah ke Template PPK</label>
+      <div class="row">
+        <div><select id="tplPenunjangKategori"><option value="obat">Obat</option><option value="lab">Laboratorium</option><option value="radiologi">Radiologi</option><option value="gizi">Gizi</option><option value="tindakan_lain">Tindakan Lain</option></select></div>
+        <div><input id="tplPenunjangNama" placeholder="Nama item, cth: Rontgen Thorax"></div>
+      </div>
+      <input id="tplPenunjangCatatan" placeholder="Catatan (opsional)" style="margin-top:6px">
+      <button class="btn sm" style="margin-top:6px" onclick="tambahTemplatePenunjang()">+ Tambah ke Template PPK</button>
+    </div>`;
+  }
+  box.innerHTML = htmlRiwayat + htmlTemplate;
+}
+async function tambahTemplatePenunjang(){
+  const kode = val("rekomKodeICD10");
+  if(!kode){ toast("Pilih diagnosa dulu"); return; }
+  const namaItem = val("tplPenunjangNama");
+  if(!namaItem || !namaItem.trim()){ toast("Isi nama item dulu"); return; }
+  const r = await api("rekomendasi.templateTambah", {kodeICD10: kode, kategori: val("tplPenunjangKategori"), namaItem, catatan: val("tplPenunjangCatatan")}, "POST");
+  if(r.ok){
+    toast(r.msg || "Ditambahkan ke Template PPK");
+    const elNama = document.getElementById("tplPenunjangNama"); if(elNama) elNama.value="";
+    const elCatatan = document.getElementById("tplPenunjangCatatan"); if(elCatatan) elCatatan.value="";
+    muatRekomendasiPenunjang();
+  } else {
+    toast(r.msg || "Gagal menambahkan");
+  }
+}
+async function sahkanTemplatePenunjang(id){
+  const r = await api("rekomendasi.templateSahkan", {id}, "POST");
+  if(r.ok){ toast(r.msg || "Disahkan"); muatRekomendasiPenunjang(); } else { toast(r.msg || "Gagal"); }
+}
+async function hapusTemplatePenunjang(id){
+  if(!confirm("Hapus item ini dari Template PPK?")) return;
+  const r = await api("rekomendasi.templateHapus", {id}, "POST");
+  if(r.ok){ toast("Dihapus"); muatRekomendasiPenunjang(); } else { toast(r.msg || "Gagal menghapus"); }
 }
 async function analisaPrediksiCBGAwal(){
   const d = window.__detail;
