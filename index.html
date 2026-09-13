@@ -196,6 +196,7 @@ const NAV = [
 {id:"alatmedis", label:"🛠️ Kalibrasi Alat Medis", step:null},
 {id:"laporanrl", label:"📊 Laporan RL", step:null},
 {id:"verifikasiklaim", label:"🔍 Verifikasi Klaim", step:null},
+{id:"pengadaanobat", label:"📦 Pengadaan & Distribusi Obat", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -210,7 +211,7 @@ const ROLE_ACCESS = {
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
   rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi","verifikasiklaim"],
   perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
-  kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
+  kasir: ["dashboard","kunjungan","billing","penunjang","tarif","pengadaanobat"],
 verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan","verifikasiklaim"],
 };
 // Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
@@ -220,7 +221,7 @@ verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penu
 const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
-  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
+  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt","pengadaanobat"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
   ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"], verifikasiklaim:["verifikasiklaim"]
 };
@@ -1005,7 +1006,8 @@ function render(){
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
     suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
-    ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim
+    ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim,
+    pengadaanobat: pagePengadaanObat
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -3266,11 +3268,15 @@ async function renderPenunjangTab(tab){
           <div class="row" style="margin-top:6px"><input id="obatStokAwal" type="number" placeholder="Stok awal"><input id="obatStokMin" type="number" placeholder="Stok minimal"></div>
           <input id="obatSatuan" placeholder="Satuan (tablet/kapsul/botol)" style="margin-top:6px">
           <input id="obatNamaGenerik" placeholder="Nama generik/kandungan (cth: Amoxicillin, Golongan Penisilin) — bantu cek alergi otomatis" style="margin-top:6px">
+          <input id="obatHargaBeliBaru" type="number" placeholder="Harga beli per satuan (Rp) — opsional, bisa diisi lewat Penerimaan nanti" style="margin-top:6px">
           <input id="obatHargaJual" type="number" placeholder="Harga jual per satuan (Rp) — dipakai auto-tagih ke Billing saat obat diserahkan" style="margin-top:6px">
           <label style="margin-top:8px"><input type="checkbox" id="obatHighAlert"> ⚠️ Obat High-Alert / perlu diwaspadai (SKP 3)</label>
           <input id="obatKategoriHighAlert" placeholder="Kategori (cth: Elektrolit Pekat, Sitostatika, LASA)" style="margin-top:6px">
           <input id="obatPasanganLasa" placeholder="Mirip/rupa-ucapan dengan obat (LASA), cth: mirip Hydralazine" style="margin-top:6px">
+          <label style="margin-top:8px"><input type="checkbox" id="obatKronisBaru"> 💊 Obat Kronis (mis. untuk Prolanis/PRB)</label>
+          <input id="obatKategoriKronisBaru" placeholder="Kategori kronis (cth: Diabetes Mellitus, Hipertensi)" style="margin-top:6px">
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahObatBaru()">Tambah Obat</button>
+          <p class="hint" style="margin-top:6px">Pengadaan resmi (Surat Pesanan → Penerimaan), pengaturan margin harga jual, dan distribusi ke unit sekarang ada di menu tersendiri: <a href="#" onclick="event.preventDefault();goTo('pengadaanobat')">📦 Pengadaan &amp; Distribusi Obat</a>.</p>
         </div>
         <div class="card">
           <label>Tambah Stok Obat yang Sudah Ada (dengan Batch &amp; Kadaluarsa)</label>
@@ -3949,7 +3955,7 @@ async function isiHasilPemeriksaan(jenis, orderId){
 /* ===== Farmasi: master obat & verifikasi resep ===== */
 function pjTableObat(rows, bolehEditHarga){
   if(!rows || !rows.length) return '<div class="empty">Belum ada obat di master</div>';
-  return `<table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Jual (Rp)</th><th>High-Alert</th><th>Status</th>${bolehEditHarga?'<th></th>':''}</tr>
+  return `<div style="overflow-x:auto"><table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Beli (Rp)</th><th>Harga Jual (Rp)</th><th>Kronis</th><th>High-Alert</th><th>Status</th>${bolehEditHarga?'<th></th>':''}</tr>
     ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}${o.aktif===false?' style="opacity:0.55"':''}>
       <td>${o.kode}</td>
       <td>${bolehEditHarga ? `<input id="obatNamaEdit_${o.kode}" value="${(o.namaObat||'').replace(/"/g,'&quot;')}" style="min-width:140px">` : o.namaObat}</td>
@@ -3957,7 +3963,11 @@ function pjTableObat(rows, bolehEditHarga){
       <td>${o.stok}</td>
       <td>${bolehEditHarga ? `<input id="obatStokMinEdit_${o.kode}" type="number" value="${o.stokMinimal}" style="width:70px">` : o.stokMinimal}</td>
       <td>${o.satuan||"-"}</td>
-      <td>${bolehEditHarga ? `<div style="display:flex;gap:4px"><input id="obatHarga_${o.kode}" type="number" value="${o.hargaJual||0}" style="width:90px"><button class="btn sm" onclick="submitSetHargaObat('${o.kode}')">Simpan</button></div>` : `Rp ${Number(o.hargaJual||0).toLocaleString('id-ID')}`}${!o.hargaJual ? `<div class="hint" style="color:var(--red)">Belum diisi — obat ini belum bisa tertagih otomatis ke Billing</div>` : ""}</td>
+      <td>Rp ${Number(o.hargaBeli||0).toLocaleString('id-ID')}<div class="hint">diperbarui otomatis dari Penerimaan</div></td>
+      <td>${bolehEditHarga ? `<div style="display:flex;gap:4px;flex-wrap:wrap"><input id="obatHarga_${o.kode}" type="number" value="${o.hargaJual||0}" style="width:90px"><button class="btn sm" onclick="submitSetHargaObat('${o.kode}')">Simpan</button></div>` : `Rp ${Number(o.hargaJual||0).toLocaleString('id-ID')}`}${!o.hargaJual ? `<div class="hint" style="color:var(--red)">Belum diisi — obat ini belum bisa tertagih otomatis ke Billing</div>` : ""}
+        ${bolehEditHarga ? `<div class="hint">${o.hargaOtomatis ? '🔄 Otomatis dari margin' : '✋ Manual'} — <a href="#" onclick="event.preventDefault();submitToggleHargaOtomatis('${o.kode}',${!o.hargaOtomatis})">${o.hargaOtomatis?'matikan':'nyalakan lagi'} mode otomatis</a></div>` : ''}
+      </td>
+      <td>${bolehEditHarga ? `<label style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" id="obatKronisEdit_${o.kode}" ${o.obatKronis?'checked':''}> Kronis</label><input id="obatKategoriKronisEdit_${o.kode}" value="${(o.kategoriKronis||'').replace(/"/g,'&quot;')}" placeholder="Kategori (mis. Diabetes)" style="margin-top:4px;min-width:120px">` : (o.obatKronis ? `<span class="badge ok">${o.kategoriKronis||'Kronis'}</span>` : '-')}</td>
       <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td>
       <td>${o.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
       ${bolehEditHarga ? `<td style="white-space:nowrap">
@@ -3966,14 +3976,20 @@ function pjTableObat(rows, bolehEditHarga){
         <button class="btn sm danger" onclick="submitHapusObat('${o.kode}')">Hapus</button>
       </td>` : ''}
     </tr>`).join("")}
-  </table>${bolehEditHarga ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau obat ini belum pernah dipakai di resep/batch manapun. Mengubah stok tetap wajib lewat "Tambah Stok" (bukan di sini) supaya riwayat batch/kadaluarsa tetap akurat.</p>' : ''}`;
+  </table></div>${bolehEditHarga ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau obat ini belum pernah dipakai di resep/batch manapun. Mengubah stok tetap wajib lewat "Tambah Stok" (bukan di sini) supaya riwayat batch/kadaluarsa tetap akurat. Harga beli & harga jual otomatis diperbarui lewat menu "📦 Pengadaan &amp; Distribusi Obat" saat ada Penerimaan baru.</p>' : ''}`;
+}
+async function submitToggleHargaOtomatis(kode, hargaOtomatis){
+  const r = await api('farmasi.setHargaOtomatis', {kode, hargaOtomatis}, 'POST');
+  if(r.ok){ toast(hargaOtomatis ? 'Mode harga otomatis dinyalakan & dihitung ulang' : 'Mode harga otomatis dimatikan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
 }
 async function submitEditObat(kode){
   const namaObat = val('obatNamaEdit_'+kode);
   if(!namaObat){ toast('Nama obat wajib diisi'); return; }
   const r = await api('farmasi.editObat', {
     kode, namaObat, namaGenerik: val('obatGenerikEdit_'+kode),
-    stokMinimal: Number(val('obatStokMinEdit_'+kode))||0
+    stokMinimal: Number(val('obatStokMinEdit_'+kode))||0,
+    obatKronis: document.getElementById('obatKronisEdit_'+kode) ? document.getElementById('obatKronisEdit_'+kode).checked : false,
+    kategoriKronis: val('obatKategoriKronisEdit_'+kode)
   }, 'POST');
   if(r.ok){ toast('Perubahan obat disimpan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
 }
@@ -3995,9 +4011,10 @@ async function submitSetHargaObat(kode){
 async function submitTambahObatBaru(){
   const r = await api('farmasi.tambahObatBaru', {
     kode:val('obatKodeBaru'), namaObat:val('obatNamaBaru'), stokAwal:Number(val('obatStokAwal'))||0, stokMinimal:Number(val('obatStokMin'))||0, satuan:val('obatSatuan'),
-    namaGenerik: val('obatNamaGenerik'), hargaJual: Number(val('obatHargaJual'))||0,
+    namaGenerik: val('obatNamaGenerik'), hargaJual: Number(val('obatHargaJual'))||0, hargaBeli: Number(val('obatHargaBeliBaru'))||0,
     isHighAlert: document.getElementById('obatHighAlert').checked,
-    kategoriHighAlert: val('obatKategoriHighAlert'), pasanganLasa: val('obatPasanganLasa')
+    kategoriHighAlert: val('obatKategoriHighAlert'), pasanganLasa: val('obatPasanganLasa'),
+    obatKronis: document.getElementById('obatKronisBaru').checked, kategoriKronis: val('obatKategoriKronisBaru')
   }, 'POST');
   if(r.ok){ toast('Obat baru ditambahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menambah obat');
 }
@@ -5400,6 +5417,392 @@ async function imporCsvSkrining(){
   } else {
     hasilEl.textContent = '❌ Gagal: ' + (r.msg||'tidak diketahui');
   }
+}
+
+/* ================= PENGADAAN & DISTRIBUSI OBAT ================= */
+function obatOptionsHtmlPengadaan(rows){
+  return (rows||[]).map(o=>`<option value="${o.kode}">${o.namaObat} (stok ${o.stok}${o.satuan?(' '+o.satuan):''})</option>`).join("");
+}
+async function pagePengadaanObat(el){
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
+  window.__spCart = []; window.__penerimaanCart = []; window.__distribusiCart = []; window.__spEditingId = null;
+  el.innerHTML = `<h1>📦 Pengadaan &amp; Distribusi Obat</h1>
+    <p class="sub">Standar pelayanan kefarmasian: Perencanaan → Surat Pesanan → Penerimaan → Distribusi/Mutasi. Melengkapi menu Farmasi (resep &amp; master obat) yang sudah ada.</p>
+    <button class="btn ghost" style="margin-bottom:12px" onclick="goTo('dashboard')">← Kembali ke Dashboard</button>
+    ${!bolehKelola ? '<p class="hint">Anda hanya bisa melihat data di halaman ini — pengelolaan (buat SP/catat penerimaan/distribusi) memerlukan modul Farmasi atau peran Admin/Kasir.</p>' : ''}
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">⚙️ Pengaturan Margin Harga Jual Default</div>
+      <div id="marginBox">Memuat...</div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">🏭 Supplier / Distributor</div>
+      ${bolehKelola ? `
+      <div class="row">
+        <input id="supplierNamaBaru" placeholder="Nama supplier/PBF">
+        <input id="supplierKontakBaru" placeholder="Kontak (telp/email)">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input id="supplierAlamatBaru" placeholder="Alamat">
+        <input id="supplierNpwpBaru" placeholder="NPWP (opsional)">
+      </div>
+      <button class="btn sm" style="margin-top:6px" onclick="submitSimpanSupplier()">+ Tambah Supplier</button>` : ''}
+      <div id="supplierListBox" style="margin-top:10px">Memuat...</div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">📋 Perencanaan &amp; Surat Pesanan (SP)</div>
+      <p class="hint">Susun rencana kebutuhan obat, lalu terbitkan sebagai Surat Pesanan resmi ke supplier.</p>
+      ${bolehKelola ? `<button class="btn sm" onclick="bukaFormSp()">+ Buat Surat Pesanan Baru</button>
+      <div id="spFormBox" style="margin-top:10px"></div>` : ''}
+      <div class="section-title" style="margin-top:16px">Daftar Surat Pesanan</div>
+      <select id="spFilterStatus" onchange="muatDaftarSp()">
+        <option value="">Semua Status</option><option>Draft</option><option>Dikirim</option><option>Diterima Sebagian</option><option>Selesai</option><option>Dibatalkan</option>
+      </select>
+      <div id="spListBox" style="margin-top:8px">Memuat...</div>
+    </div>
+
+    ${bolehKelola ? `
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">📥 Penerimaan Barang</div>
+      <p class="hint">Catat barang yang benar-benar diterima dari supplier — dengan atau tanpa Surat Pesanan (mis. hibah/donasi/koreksi). Stok, batch, harga beli &amp; harga jual (kalau mode otomatis) langsung diperbarui.</p>
+      <div class="row">
+        <div><label>Surat Pesanan (opsional)</label><select id="penerimaanSpId"><option value="">-- Tanpa SP --</option></select></div>
+        <div><label>Supplier (opsional)</label><select id="penerimaanSupplierId"><option value="">-- Pilih --</option></select></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div><label>Tanggal Terima</label><input id="penerimaanTanggal" type="date"></div>
+        <div><label>Catatan</label><input id="penerimaanCatatan" placeholder="Opsional"></div>
+      </div>
+      <div class="section-title" style="margin-top:12px">Tambah Item</div>
+      <div class="row">
+        <select id="penerimaanKodeObat"><option value="">-- Pilih Obat --</option></select>
+        <input id="penerimaanJumlah" type="number" placeholder="Jumlah">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input id="penerimaanNoBatch" placeholder="No. Batch">
+        <input id="penerimaanTglKadaluarsa" type="date">
+        <input id="penerimaanHargaBeli" type="number" placeholder="Harga beli satuan (Rp)">
+      </div>
+      <button class="btn sm ghost" style="margin-top:6px" onclick="tambahKePenerimaanCart()">+ Tambah ke Daftar</button>
+      <div id="penerimaanCartBox" style="margin-top:8px"></div>
+      <button class="btn" style="margin-top:10px" onclick="submitCatatPenerimaan()">Simpan Penerimaan</button>
+      <div class="section-title" style="margin-top:16px">Riwayat Penerimaan</div>
+      <div id="penerimaanListBox">Memuat...</div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="section-title">🚚 Distribusi / Mutasi ke Unit</div>
+      <p class="hint">Catat pengiriman obat dari farmasi pusat ke unit/depo lain (cth: Rawat Inap, IGD, Poli) — mengurangi stok pusat &amp; tercatat sebagai jejak penggunaan. Stok tetap satu angka global (bukan stok terpisah per unit).</p>
+      <div class="row">
+        <div><label>Unit/Lokasi Tujuan</label><input id="distribusiUnitTujuan" placeholder="cth: Depo Farmasi Rawat Inap"></div>
+        <div><label>Keterangan</label><input id="distribusiKeterangan" placeholder="Opsional"></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <select id="distribusiKodeObat"><option value="">-- Pilih Obat --</option></select>
+        <input id="distribusiJumlah" type="number" placeholder="Jumlah">
+      </div>
+      <button class="btn sm ghost" style="margin-top:6px" onclick="tambahKeDistribusiCart()">+ Tambah ke Daftar</button>
+      <div id="distribusiCartBox" style="margin-top:8px"></div>
+      <button class="btn" style="margin-top:10px" onclick="submitDistribusi()">Simpan Distribusi</button>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="section-title">📈 Riwayat Pemakaian Obat</div>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="rekapDari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="rekapSampai" type="date"></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatRekapPemakaian()">Tampilkan</button></div>
+      </div>
+      <div id="rekapPemakaianBox" style="margin-top:8px">Pilih rentang tanggal lalu klik "Tampilkan".</div>
+    </div>
+    <div id="spDetailPanel"></div>`;
+
+  const obatRows = await api('farmasi.listObat', {}, 'POST');
+  window.__obatRowsCachePengadaan = obatRows || [];
+  const opsi = obatOptionsHtmlPengadaan(obatRows);
+  if(bolehKelola){
+    document.getElementById('penerimaanKodeObat').innerHTML = '<option value="">-- Pilih Obat --</option>' + opsi;
+    document.getElementById('distribusiKodeObat').innerHTML = '<option value="">-- Pilih Obat --</option>' + opsi;
+  }
+  await muatPengaturanMargin();
+  await muatSupplierPengadaan();
+  await muatDaftarSp();
+  if(bolehKelola){
+    await muatDaftarPenerimaan();
+    const supplierRows = await api('farmasi.supplierList', {}, 'POST');
+    const opsiSupplier = (supplierRows||[]).filter(s=>s.aktif!==false).map(s=>`<option value="${s.id}">${esc(s.nama)}</option>`).join("");
+    document.getElementById('penerimaanSupplierId').innerHTML = '<option value="">-- Pilih --</option>' + opsiSupplier;
+  }
+}
+
+/* ---- Pengaturan Margin ---- */
+async function muatPengaturanMargin(){
+  const box = document.getElementById('marginBox'); if(!box) return;
+  const r = await api('farmasi.pengaturanGet', {}, 'POST');
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
+  box.innerHTML = `<p class="hint">Harga jual obat dihitung otomatis dari <b>harga beli × (1 + persentase margin)</b> setiap ada Penerimaan baru (kecuali obat yang harganya sudah diatur manual, atau punya persentase margin khusus sendiri).</p>
+    <div class="row">
+      <div><label>Persentase Margin Default (%)</label><input id="marginDefault" type="number" step="0.1" value="${r.persenMarginDefault||0}" ${bolehKelola?'':'disabled'}></div>
+      ${bolehKelola ? `<div style="align-self:flex-end"><button class="btn sm" onclick="submitSimpanMargin()">Simpan</button></div>` : ''}
+    </div>
+    <p class="hint">Persentase margin khusus per obat bisa diisi lewat "Edit" di tabel Master Obat (menu Unit Penunjang → Farmasi).</p>`;
+}
+async function submitSimpanMargin(){
+  const persenMarginDefault = Number(val('marginDefault'));
+  if(isNaN(persenMarginDefault) || persenMarginDefault < 0){ toast('Persentase margin harus angka 0 atau lebih'); return; }
+  const r = await api('farmasi.pengaturanSimpan', {persenMarginDefault}, 'POST');
+  toast(r.ok ? (r.msg||'Pengaturan margin disimpan') : (r.msg||'Gagal menyimpan'));
+  if(r.ok) await muatPengaturanMargin();
+}
+
+/* ---- Supplier ---- */
+async function muatSupplierPengadaan(){
+  const box = document.getElementById('supplierListBox'); if(!box) return;
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
+  const rows = await api('farmasi.supplierList', {}, 'POST');
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada supplier terdaftar</div>'; return; }
+  box.innerHTML = `<table><tr><th>Nama</th><th>Kontak</th><th>Alamat</th><th>NPWP</th><th>Status</th>${bolehKelola?'<th></th>':''}</tr>
+    ${rows.map(s=>`<tr${s.aktif===false?' style="opacity:0.55"':''}>
+      <td>${esc(s.nama)}</td><td>${esc(s.kontak||'-')}</td><td>${esc(s.alamat||'-')}</td><td>${esc(s.npwp||'-')}</td>
+      <td>${s.aktif===false?'<span class="badge muted">Nonaktif</span>':'<span class="badge ok">Aktif</span>'}</td>
+      ${bolehKelola?`<td><button class="btn sm" onclick="submitToggleAktifSupplier('${s.id}',${s.aktif===false})">${s.aktif===false?'Aktifkan':'Nonaktifkan'}</button></td>`:''}
+    </tr>`).join("")}
+  </table>`;
+}
+async function submitSimpanSupplier(){
+  const nama = val('supplierNamaBaru');
+  if(!nama){ toast('Nama supplier wajib diisi'); return; }
+  const r = await api('farmasi.supplierSimpan', {nama, kontak: val('supplierKontakBaru'), alamat: val('supplierAlamatBaru'), npwp: val('supplierNpwpBaru')}, 'POST');
+  if(r.ok){ toast('Supplier ditambahkan'); document.getElementById('supplierNamaBaru').value=''; document.getElementById('supplierKontakBaru').value=''; document.getElementById('supplierAlamatBaru').value=''; document.getElementById('supplierNpwpBaru').value=''; goTo('pengadaanobat'); } else toast(r.msg||'Gagal menyimpan');
+}
+async function submitToggleAktifSupplier(id, aktifBaru){
+  const r = await api('farmasi.supplierSetAktif', {id, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru?'Supplier diaktifkan':'Supplier dinonaktifkan') : (r.msg||'Gagal'));
+  if(r.ok) await muatSupplierPengadaan();
+}
+
+/* ---- Surat Pesanan (Perencanaan) ---- */
+function renderSpCart(){
+  const box = document.getElementById('spCartBox'); if(!box) return;
+  const cart = window.__spCart||[];
+  if(!cart.length){ box.innerHTML = '<div class="hint">Belum ada obat ditambahkan.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>Jumlah</th><th>Harga Beli Perkiraan</th><th></th></tr>
+    ${cart.map((it,i)=>`<tr><td>${esc(it.nama)}</td><td>${it.jumlah}</td><td>Rp ${Number(it.hargaBeliPerkiraan||0).toLocaleString('id-ID')}</td>
+      <td><button class="btn sm danger" onclick="hapusDariSpCart(${i})">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+function tambahKeSpCart(){
+  const kode = val('spKodeObat');
+  if(!kode){ toast('Pilih obat dulu'); return; }
+  const jumlah = Number(val('spJumlah'))||0;
+  if(jumlah <= 0){ toast('Jumlah harus lebih dari 0'); return; }
+  const nama = namaObatDariKodePengadaan(kode);
+  window.__spCart.push({kode, nama, jumlah, hargaBeliPerkiraan: Number(val('spHargaBeliPerkiraan'))||0});
+  renderSpCart();
+  document.getElementById('spKodeObat').value=''; document.getElementById('spJumlah').value=''; document.getElementById('spHargaBeliPerkiraan').value='';
+}
+function hapusDariSpCart(idx){ window.__spCart.splice(idx,1); renderSpCart(); }
+function namaObatDariKodePengadaan(kode){
+  const o = (window.__obatRowsCachePengadaan||[]).find(x=>x.kode===kode);
+  return o ? o.namaObat : kode;
+}
+function bukaFormSpDariCache(){
+  if(!window.__spDetailCache){ toast('Data SP tidak ditemukan, buka ulang detailnya'); return; }
+  bukaFormSp(window.__spDetailCache);
+}
+async function bukaFormSp(sp){
+  window.__spCart = (sp && sp.items) ? sp.items.map(it=>({kode:it.kodeObat, nama:it.namaObat, jumlah:it.jumlahDipesan, hargaBeliPerkiraan:it.hargaBeliPerkiraan})) : [];
+  window.__spEditingId = sp ? sp.header.id : null;
+  const supplierRows = await api('farmasi.supplierList', {}, 'POST');
+  const opsiSupplier = (supplierRows||[]).filter(s=>s.aktif!==false).map(s=>`<option value="${s.id}" ${sp && sp.header.supplierId===s.id?'selected':''}>${esc(s.nama)}</option>`).join("");
+  const opsiObat = obatOptionsHtmlPengadaan(window.__obatRowsCachePengadaan);
+  const box = document.getElementById('spFormBox');
+  box.innerHTML = `<div class="card">
+    <div class="section-title">${sp ? 'Ubah Surat Pesanan (Draft)' : 'Surat Pesanan Baru'}</div>
+    <div class="row">
+      <div><label>Supplier</label><select id="spSupplierId"><option value="">-- Pilih --</option>${opsiSupplier}</select></div>
+      <div><label>Tanggal Pesan</label><input id="spTanggalPesan" type="date" value="${sp ? sp.header.tanggalPesan : new Date().toISOString().slice(0,10)}"></div>
+    </div>
+    <label style="margin-top:6px">Catatan</label><input id="spCatatan" value="${sp ? esc(sp.header.catatan||'') : ''}" placeholder="Opsional">
+    <div class="section-title" style="margin-top:12px">Tambah Obat</div>
+    <div class="row">
+      <select id="spKodeObat"><option value="">-- Pilih Obat --</option>${opsiObat}</select>
+      <input id="spJumlah" type="number" placeholder="Jumlah dipesan">
+      <input id="spHargaBeliPerkiraan" type="number" placeholder="Harga beli perkiraan (Rp)">
+    </div>
+    <button class="btn sm ghost" style="margin-top:6px" onclick="tambahKeSpCart()">+ Tambah</button>
+    <div id="spCartBox" style="margin-top:8px"></div>
+    <button class="btn" style="margin-top:10px" onclick="submitSimpanSp()">${sp ? 'Simpan Perubahan' : 'Simpan sebagai Draft'}</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="document.getElementById('spFormBox').innerHTML=''">Batal</button>
+  </div>`;
+  renderSpCart();
+}
+async function submitSimpanSp(){
+  if(!(window.__spCart||[]).length){ toast('Tambahkan minimal satu obat'); return; }
+  const payload = {
+    supplierId: val('spSupplierId'), tanggalPesan: val('spTanggalPesan'), catatan: val('spCatatan'),
+    items: window.__spCart.map(it=>({kode:it.kode, jumlah:it.jumlah, hargaBeliPerkiraan:it.hargaBeliPerkiraan}))
+  };
+  const aksi = window.__spEditingId ? 'farmasi.spEdit' : 'farmasi.spBuat';
+  if(window.__spEditingId) payload.id = window.__spEditingId;
+  const r = await api(aksi, payload, 'POST');
+  if(r.ok){
+    toast(r.noSp ? `Surat Pesanan ${r.noSp} disimpan sebagai Draft` : 'Surat Pesanan diperbarui');
+    document.getElementById('spFormBox').innerHTML = '';
+    window.__spCart = []; window.__spEditingId = null;
+    await muatDaftarSp();
+  } else toast(r.msg || 'Gagal menyimpan');
+}
+async function muatDaftarSp(){
+  const box = document.getElementById('spListBox'); if(!box) return;
+  const status = val('spFilterStatus');
+  const rows = await api('farmasi.spList', {status}, 'POST');
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada Surat Pesanan</div>'; return; }
+  const badgeKelas = {Draft:'muted', Dikirim:'warn', 'Diterima Sebagian':'warn', Selesai:'ok', Dibatalkan:'danger'};
+  box.innerHTML = `<table><tr><th>No. SP</th><th>Tanggal</th><th>Supplier</th><th>Jml Item</th><th>Status</th><th></th></tr>
+    ${rows.map(sp=>`<tr>
+      <td>${sp.noSp}</td><td>${new Date(sp.tanggalPesan).toLocaleDateString('id-ID')}</td><td>${esc(sp.namaSupplier||'-')}</td><td>${sp.jumlahItem}</td>
+      <td><span class="badge ${badgeKelas[sp.status]||'muted'}">${sp.status}</span></td>
+      <td><button class="btn sm ghost" onclick="bukaDetailSp('${sp.id}')">Detail</button></td>
+    </tr>`).join("")}
+  </table>`;
+}
+async function bukaDetailSp(id){
+  const r = await api('farmasi.spDetail', {id}, 'POST');
+  const panel = document.getElementById('spDetailPanel');
+  if(!r.ok){ toast(r.msg||'Gagal memuat detail'); return; }
+  window.__spDetailCache = r;
+  const h = r.header;
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
+  panel.innerHTML = `<div class="modal-backdrop" onclick="if(event.target===this) this.remove()">
+    <div class="modal">
+      <h2 style="margin-top:0">Surat Pesanan ${h.noSp}</h2>
+      <p class="hint">${new Date(h.tanggalPesan).toLocaleDateString('id-ID')} · Supplier: ${esc(h.namaSupplier||'-')} · Status: <b>${h.status}</b></p>
+      ${h.catatan ? `<p class="hint" style="white-space:pre-wrap">Catatan: ${esc(h.catatan)}</p>` : ''}
+      <table><tr><th>Obat</th><th>Dipesan</th><th>Diterima</th><th>Harga Beli Perkiraan</th></tr>
+        ${(r.items||[]).map(it=>`<tr><td>${esc(it.namaObat)}</td><td>${it.jumlahDipesan} ${it.satuan||''}</td><td>${it.jumlahDiterima}</td><td>Rp ${Number(it.hargaBeliPerkiraan||0).toLocaleString('id-ID')}</td></tr>`).join("")}
+      </table>
+      ${bolehKelola ? `<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+        ${h.status==='Draft' ? `<button class="btn sm" onclick="this.closest('.modal-backdrop').remove();bukaFormSpDariCache()">Ubah</button>` : ''}
+        ${h.status==='Draft' ? `<button class="btn sm" onclick="submitKirimSp('${id}')">Terbitkan/Kirim ke Supplier</button>` : ''}
+        ${['Draft','Dikirim','Diterima Sebagian'].includes(h.status) ? `<button class="btn sm danger" onclick="submitBatalkanSp('${id}')">Batalkan</button>` : ''}
+      </div>` : ''}
+      <div style="margin-top:16px;text-align:right"><button class="ghost" onclick="this.closest('.modal-backdrop').remove()">Tutup</button></div>
+    </div>
+  </div>`;
+}
+async function submitKirimSp(id){
+  const r = await api('farmasi.spKirim', {id}, 'POST');
+  toast(r.ok ? (r.msg||'SP diterbitkan') : (r.msg||'Gagal'));
+  if(r.ok){ document.getElementById('spDetailPanel').innerHTML=''; await muatDaftarSp(); }
+}
+async function submitBatalkanSp(id){
+  const alasan = prompt('Alasan pembatalan (opsional):') || '';
+  const r = await api('farmasi.spBatalkan', {id, alasan}, 'POST');
+  toast(r.ok ? (r.msg||'SP dibatalkan') : (r.msg||'Gagal'));
+  if(r.ok){ document.getElementById('spDetailPanel').innerHTML=''; await muatDaftarSp(); }
+}
+
+/* ---- Penerimaan ---- */
+function renderPenerimaanCart(){
+  const box = document.getElementById('penerimaanCartBox'); if(!box) return;
+  const cart = window.__penerimaanCart||[];
+  if(!cart.length){ box.innerHTML = '<div class="hint">Belum ada obat ditambahkan.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>No. Batch</th><th>Kadaluarsa</th><th>Jumlah</th><th>Harga Beli</th><th></th></tr>
+    ${cart.map((it,i)=>`<tr><td>${esc(it.nama)}</td><td>${esc(it.noBatch)}</td><td>${it.tanggalKadaluarsa}</td><td>${it.jumlah}</td><td>Rp ${Number(it.hargaBeliSatuan||0).toLocaleString('id-ID')}</td>
+      <td><button class="btn sm danger" onclick="hapusDariPenerimaanCart(${i})">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+function tambahKePenerimaanCart(){
+  const kode = val('penerimaanKodeObat');
+  if(!kode){ toast('Pilih obat dulu'); return; }
+  const jumlah = Number(val('penerimaanJumlah'))||0;
+  const noBatch = val('penerimaanNoBatch');
+  const tanggalKadaluarsa = val('penerimaanTglKadaluarsa');
+  if(jumlah <= 0){ toast('Jumlah harus lebih dari 0'); return; }
+  if(!noBatch){ toast('Nomor batch wajib diisi'); return; }
+  if(!tanggalKadaluarsa){ toast('Tanggal kadaluarsa wajib diisi'); return; }
+  window.__penerimaanCart.push({kode, nama: namaObatDariKodePengadaan(kode), jumlah, noBatch, tanggalKadaluarsa, hargaBeliSatuan: Number(val('penerimaanHargaBeli'))||0});
+  renderPenerimaanCart();
+  document.getElementById('penerimaanJumlah').value=''; document.getElementById('penerimaanNoBatch').value='';
+  document.getElementById('penerimaanTglKadaluarsa').value=''; document.getElementById('penerimaanHargaBeli').value='';
+}
+function hapusDariPenerimaanCart(idx){ window.__penerimaanCart.splice(idx,1); renderPenerimaanCart(); }
+async function submitCatatPenerimaan(){
+  if(!(window.__penerimaanCart||[]).length){ toast('Tambahkan minimal satu obat'); return; }
+  const payload = {
+    suratPesananId: val('penerimaanSpId') || null, supplierId: val('penerimaanSupplierId') || null,
+    tanggalTerima: val('penerimaanTanggal'), catatan: val('penerimaanCatatan'),
+    items: window.__penerimaanCart.map(it=>({kode:it.kode, noBatch:it.noBatch, tanggalKadaluarsa:it.tanggalKadaluarsa, jumlah:it.jumlah, hargaBeliSatuan:it.hargaBeliSatuan}))
+  };
+  const r = await api('farmasi.penerimaanCatat', payload, 'POST');
+  if(r.ok){
+    toast(`Penerimaan ${r.noPenerimaan} tercatat`);
+    window.__penerimaanCart = [];
+    goTo('pengadaanobat');
+  } else toast(r.msg || 'Gagal mencatat penerimaan');
+}
+async function muatDaftarPenerimaan(){
+  const box = document.getElementById('penerimaanListBox'); if(!box) return;
+  const rows = await api('farmasi.penerimaanList', {}, 'POST');
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada riwayat penerimaan</div>'; return; }
+  box.innerHTML = `<table><tr><th>No. Penerimaan</th><th>Tanggal</th><th>No. SP</th><th>Supplier</th><th>Jml Item</th><th>Catatan</th></tr>
+    ${rows.map(p=>`<tr><td>${p.noPenerimaan}</td><td>${new Date(p.tanggalTerima).toLocaleDateString('id-ID')}</td><td>${p.noSp||'-'}</td><td>${esc(p.namaSupplier||'-')}</td><td>${p.jumlahItem}</td><td>${esc(p.catatan||'-')}</td></tr>`).join("")}
+  </table>`;
+  // isi juga dropdown SP yang boleh dipilih (Dikirim/Diterima Sebagian) untuk form penerimaan
+  const spTerbuka = await api('farmasi.spList', {}, 'POST');
+  const sel = document.getElementById('penerimaanSpId');
+  if(sel){
+    const opsi = (spTerbuka||[]).filter(sp=>['Dikirim','Diterima Sebagian'].includes(sp.status))
+      .map(sp=>`<option value="${sp.id}">${sp.noSp} (${sp.namaSupplier||'-'}, ${sp.status})</option>`).join("");
+    sel.innerHTML = '<option value="">-- Tanpa SP --</option>' + opsi;
+  }
+}
+
+/* ---- Distribusi / Mutasi ---- */
+function renderDistribusiCart(){
+  const box = document.getElementById('distribusiCartBox'); if(!box) return;
+  const cart = window.__distribusiCart||[];
+  if(!cart.length){ box.innerHTML = '<div class="hint">Belum ada obat ditambahkan.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>Jumlah</th><th></th></tr>
+    ${cart.map((it,i)=>`<tr><td>${esc(it.nama)}</td><td>${it.jumlah}</td><td><button class="btn sm danger" onclick="hapusDariDistribusiCart(${i})">Hapus</button></td></tr>`).join("")}
+  </table>`;
+}
+function tambahKeDistribusiCart(){
+  const kode = val('distribusiKodeObat');
+  if(!kode){ toast('Pilih obat dulu'); return; }
+  const jumlah = Number(val('distribusiJumlah'))||0;
+  if(jumlah <= 0){ toast('Jumlah harus lebih dari 0'); return; }
+  window.__distribusiCart.push({kode, nama: namaObatDariKodePengadaan(kode), jumlah});
+  renderDistribusiCart();
+  document.getElementById('distribusiJumlah').value='';
+}
+function hapusDariDistribusiCart(idx){ window.__distribusiCart.splice(idx,1); renderDistribusiCart(); }
+async function submitDistribusi(){
+  const unitTujuan = val('distribusiUnitTujuan');
+  if(!unitTujuan){ toast('Unit/lokasi tujuan wajib diisi'); return; }
+  if(!(window.__distribusiCart||[]).length){ toast('Tambahkan minimal satu obat'); return; }
+  const payload = {unitTujuan, keterangan: val('distribusiKeterangan'), items: window.__distribusiCart.map(it=>({kode:it.kode, jumlah:it.jumlah}))};
+  const r = await api('farmasi.mutasiDistribusi', payload, 'POST');
+  if(r.ok){
+    toast(r.msg || 'Distribusi tercatat');
+    window.__distribusiCart = [];
+    goTo('pengadaanobat');
+  } else toast(r.msg || 'Gagal mencatat distribusi');
+}
+
+/* ---- Riwayat Pemakaian ---- */
+async function muatRekapPemakaian(){
+  const box = document.getElementById('rekapPemakaianBox'); if(!box) return;
+  const tanggalDari = val('rekapDari'); const tanggalSampai = val('rekapSampai');
+  box.innerHTML = 'Memuat...';
+  const rows = await api('farmasi.rekapPemakaian', {tanggalDari, tanggalSampai}, 'POST');
+  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Tidak ada data pemakaian pada rentang ini.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Obat</th><th>Total Keluar</th><th>Untuk Resep Pasien</th><th>Untuk Distribusi Unit</th></tr>
+    ${rows.map(x=>`<tr><td>${esc(x.namaObat)}</td><td>${x.totalKeluar} ${x.satuan||''}</td><td>${x.keluarResep||0}</td><td>${x.keluarDistribusi||0}</td></tr>`).join("")}
+  </table>`;
 }
 
 /* ================= PENGATURAN & LOG NOTIFIKASI WHATSAPP (admin) ================= */
