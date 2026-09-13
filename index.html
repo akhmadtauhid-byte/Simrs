@@ -538,6 +538,7 @@ async function pageKelolaPegawai(){
       </div>
       <button class="btn" style="margin-top:10px" onclick="tambahPegawaiBaru()">Tambah Pegawai</button>
     </div>
+    ${kotakCariHtml('pegawaiBody', 'Cari nama/jabatan/No. STR/No. SIP...')}
     <div id="pegawaiBody" class="empty">Memuat...</div>`;
   await muatKelolaPegawai();
 }
@@ -546,13 +547,10 @@ function badgeMasaBerlaku(status){
   const cls = status==="Kadaluarsa" ? "danger" : (status==="Akan Habis" ? "warn" : "ok");
   return `<span class="badge ${cls}">${status}</span>`;
 }
-async function muatKelolaPegawai(){
-  const body = document.getElementById("pegawaiBody");
-  const r = await api("kelolaPegawai.list", {}, "GET");
-  if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat data"}</div>`; return; }
-  if(!r.data.length){ body.innerHTML = `<div class="empty">Belum ada pegawai terdaftar.</div>`; return; }
-  body.innerHTML = `<table><tr><th>Nama</th><th>Jabatan</th><th>No. STR</th><th>STR Berlaku Sampai</th><th>Status STR</th><th>No. SIP</th><th>SIP Berlaku Sampai</th><th>Status SIP</th><th>Status</th><th></th></tr>
-    ${r.data.map(p => `<tr>
+function renderPegawaiRows(rows){
+  if(!rows.length) return `<div class="empty">Belum ada pegawai terdaftar.</div>`;
+  return `<table><tr><th>Nama</th><th>Jabatan</th><th>No. STR</th><th>STR Berlaku Sampai</th><th>Status STR</th><th>No. SIP</th><th>SIP Berlaku Sampai</th><th>Status SIP</th><th>Status</th><th></th></tr>
+    ${rows.map(p => `<tr>
       <td><input id="pn_${p.id}" value="${(p.nama||'').replace(/"/g,'&quot;')}" style="min-width:160px"></td>
       <td><input id="pj_${p.id}" value="${(p.jabatan||'').replace(/"/g,'&quot;')}" style="min-width:140px"></td>
       <td><input id="pstrn_${p.id}" value="${(p.strNomor||'').replace(/"/g,'&quot;')}" style="min-width:100px"></td>
@@ -570,6 +568,12 @@ async function muatKelolaPegawai(){
     </tr>`).join("")}
     </table>
     <p class="hint">Pegawai yang dinonaktifkan otomatis hilang dari daftar pilihan Pelaksana/DPJP untuk data baru, tapi riwayat tindakan/kunjungan lamanya tetap tersimpan aman — tidak pernah dihapus permanen dari sistem. Tombol "Hapus" hanya berhasil kalau pegawai ini BELUM PERNAH tertaut ke tindakan/kunjungan/jadwal apa pun — kalau sudah pernah, sistem akan menolak & menyarankan "Nonaktifkan" saja. Status STR/SIP: "Akan Habis" = kurang dari 60 hari lagi, "Kadaluarsa" = sudah lewat tanggal berlaku.</p>`;
+}
+async function muatKelolaPegawai(){
+  const body = document.getElementById("pegawaiBody");
+  const r = await api("kelolaPegawai.list", {}, "GET");
+  if(!r.ok){ body.innerHTML = `<div class="empty">${r.msg||"Gagal memuat data"}</div>`; return; }
+  setListSearchState('pegawaiBody', r.data, renderPegawaiRows, ['nama','jabatan','strNomor','sipNomor']);
 }
 async function hapusPegawai(id, nama){
   if(!confirm(`Hapus permanen data pegawai "${nama}"?\n\nHanya berhasil kalau pegawai ini belum pernah dipakai di tindakan/kunjungan/jadwal apa pun.`)) return;
@@ -1562,6 +1566,32 @@ function val(id){ return document.getElementById(id).value.trim(); }
 // selalu di-escape sebelum ditaruh sebagai innerHTML.
 function esc(s){ if(s===undefined||s===null) return ''; return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+/* ============ Kolom pencarian generik (client-side) untuk daftar panjang ============
+   Dipakai di banyak halaman (Pegawai, Alat Medis, IKP, Keluhan Pasien, PPI,
+   Jadwal Jaga, Jadwal Operasi, Pengadaan Obat, Master Obat, Clinical Pathway,
+   dst) supaya tiap daftar yang sudah lengkap termuat punya kolom pencarian
+   instan tanpa panggilan server baru tiap huruf diketik -- filter cukup di
+   browser. Dikunci per containerId supaya beberapa daftar bisa aktif
+   berdampingan tanpa saling menimpa state satu sama lain. Ini terpisah dari
+   __tarifListState (khusus tab Master Tarif) yang sudah ada lebih dulu. */
+window.__listSearchState = {};
+function setListSearchState(containerId, rows, renderFn, fields, inputId){
+  window.__listSearchState[containerId] = {rows: rows || [], renderFn, fields, inputId: inputId || (containerId + '_cari')};
+  renderFilteredList(containerId);
+}
+function renderFilteredList(containerId){
+  const st = window.__listSearchState[containerId]; if(!st) return;
+  const box = document.getElementById(containerId); if(!box) return;
+  const qEl = document.getElementById(st.inputId);
+  const q = qEl ? qEl.value.toLowerCase().trim() : '';
+  const rows = !q ? st.rows : st.rows.filter(r => st.fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+  box.innerHTML = st.renderFn(rows);
+}
+function kotakCariHtml(containerId, placeholder){
+  const inputId = containerId + '_cari';
+  return `<div style="margin-bottom:10px"><input id="${inputId}" oninput="renderFilteredList('${containerId}')" placeholder="${placeholder || 'Cari...'}"></div>`;
+}
+
 /* ============ Pencarian kode ICD-10 / ICD-9-CM ============ */
 let searchDebounce;
 function cariKode(inputId, boxId, searchFn){
@@ -1583,6 +1613,7 @@ function pilihKode(inputId, boxId, kode, desk){
   if(inputId==="cariICD10Sekunder"){ document.getElementById("kodeICD10Sekunder").value = kode; document.getElementById("deskDiagSekunder").value = desk; }
   if(inputId==="cariICD9"){ document.getElementById("kodeICD9").value = kode; document.getElementById("deskTindakan").value = desk; }
   if(inputId==="cpCariICD10"){ document.getElementById("cpKodeIcd10").value = kode; }
+  if(inputId==="ttCariICD9"){ document.getElementById("tt_kode").value = kode; }
 }
 // Fallback offline ringkas untuk mode demo (database lengkap 7.433/3.979 kode ada di backend Apps Script)
 const ICD10_DEMO_FALLBACK = [
@@ -3293,7 +3324,8 @@ async function renderPenunjangTab(tab){
           <button class="btn sm" style="margin-top:6px" onclick="submitTambahStok()">Tambah Stok</button>
         </div>
       </div>
-      <div style="margin-top:10px">${pjTableObat(obatRows, bolehKelola)}</div>
+      ${kotakCariHtml('obatMasterList', 'Cari kode/nama obat/nama generik...')}
+      <div id="obatMasterList" style="margin-top:10px"></div>
       <div class="section-title" style="margin-top:20px">⏰ Obat Mendekati/Sudah Kadaluarsa</div>
       <div class="row">
         <div><label>Ambang Hari (tampilkan yang kadaluarsa dalam N hari)</label><input id="obatAmbangHari" type="number" value="90"></div>
@@ -3330,6 +3362,7 @@ async function renderPenunjangTab(tab){
     await isiSelectPegawai('pj_dokterId');
     await isiSelectPoliFavorit('pj_poliFavorit');
     renderKeranjangResep();
+    if(bolehKelola) setListSearchState('obatMasterList', obatRows, r2 => pjTableObat(r2, bolehKelola), ['kode','namaObat','namaGenerik']);
     if (bolehKelola) {
       await isiSelectPegawaiPolos('tplDokterId', '-- Pilih Dokter --');
       await isiSelectPoliFavorit('tplPoliKode', '-- Pilih Poli --');
@@ -4280,6 +4313,7 @@ async function pageIKP(el){
       <button class="btn" style="margin-top:10px" onclick="submitLaporIKP()">Kirim Laporan</button>
     </div>
     <div class="section-title" style="margin-top:20px">${bolehKelola ? "Semua Laporan Insiden" : "Laporan Saya"}</div>
+    ${kotakCariHtml('ikpList', 'Cari jenis/lokasi/pasien/kronologi...')}
     <div id="ikpList">Memuat...</div>`;
   document.getElementById("ikpTanggal").value = new Date().toISOString().slice(0,16);
   await muatDaftarIKP(bolehKelola);
@@ -4299,11 +4333,13 @@ async function submitLaporIKP(){
   if(r.ok){ toast(r.msg || "Laporan terkirim"); goTo("ikp"); } else toast(r.msg || "Gagal mengirim laporan");
 }
 async function muatDaftarIKP(bolehKelola){
-  const box = document.getElementById("ikpList");
   const list = await api("ikp.daftar", {}, "GET");
-  if(!Array.isArray(list) || !list.length){ box.innerHTML = `<div class="empty">Belum ada laporan.</div>`; return; }
+  setListSearchState('ikpList', Array.isArray(list) ? list : [], rows => renderIkpRows(rows, bolehKelola), ['jenisInsiden','lokasi','namaPasienTerkait','noRmTerkait','kronologi','status']);
+}
+function renderIkpRows(list, bolehKelola){
+  if(!list.length) return `<div class="empty">Belum ada laporan.</div>`;
   const gradingBadge = { Biru:"badge-Biru", Hijau:"badge-Hijau", Kuning:"badge-Kuning", Merah:"badge-Merah" };
-  box.innerHTML = list.map(i => `
+  return list.map(i => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div><b>${i.jenisInsiden}</b> — ${i.lokasi} <span class="hint">(${new Date(i.tanggalKejadian).toLocaleString('id-ID')})</span></div>
@@ -4365,6 +4401,7 @@ async function pageKeluhanPasien(el){
       <button class="btn" style="margin-top:10px" onclick="submitKeluhanPasien()">Kirim</button>
     </div>
     <div class="section-title" style="margin-top:20px">${bolehKelola ? "Semua Catatan" : "Catatan Saya"}</div>
+    ${kotakCariHtml('klList', 'Cari jenis/unit/pasien/isi...')}
     <div id="klList">Memuat...</div>`;
   await muatDaftarKeluhan(bolehKelola);
 }
@@ -4379,11 +4416,13 @@ async function submitKeluhanPasien(){
   if(r.ok){ toast(r.msg || "Tercatat"); goTo("keluhan"); } else toast(r.msg || "Gagal mencatat");
 }
 async function muatDaftarKeluhan(bolehKelola){
-  const box = document.getElementById("klList");
   const r = await api("keluhan.daftar", {}, "GET");
   const list = Array.isArray(r) ? r : [];
-  if(!list.length){ box.innerHTML = `<div class="empty">Belum ada catatan.</div>`; return; }
-  box.innerHTML = list.map(k => `
+  setListSearchState('klList', list, rows => renderKeluhanRows(rows, bolehKelola), ['jenis','unitTerkait','namaPasienTerkait','noRmTerkait','isi','status']);
+}
+function renderKeluhanRows(list, bolehKelola){
+  if(!list.length) return `<div class="empty">Belum ada catatan.</div>`;
+  return list.map(k => `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div><b>${k.jenis}</b>${k.unitTerkait ? ` — ${k.unitTerkait}` : ""} <span class="hint">(${new Date(k.waktuDicatat).toLocaleString('id-ID')})</span></div>
@@ -4488,6 +4527,25 @@ async function simpanPengaturanReasesmen(kunci){
 // pun (mis. Ambulans, Tindakan Umum) -- perilaku LAMA sebelum fitur per-unit
 // ini tetap bisa dipakai lewat tab ini.
 const TARIF_UNIT_LABEL = {lab:"Lab", radiologi:"Radiologi", gizi:"Gizi", cssd:"CSSD", linen:"Linen", jenazah:"Pemulasaraan Jenazah", lainnya:"Lainnya"};
+// Helper generik kolom pencarian client-side untuk daftar Master Tarif (dan
+// dipakai ulang di halaman lain) -- data sudah lengkap termuat, jadi filter
+// cukup di browser tanpa panggilan server baru tiap huruf diketik.
+window.__tarifListState = null;
+function setTarifListState(rows, renderFn, fields, containerId){
+  window.__tarifListState = {rows: rows || [], renderFn, fields, containerId: containerId || 'tfList'};
+  renderFilteredTarifList();
+}
+function renderFilteredTarifList(){
+  const st = window.__tarifListState; if(!st) return;
+  const box = document.getElementById(st.containerId); if(!box) return;
+  const qEl = document.getElementById('tf_cari');
+  const q = qEl ? qEl.value.toLowerCase().trim() : '';
+  const rows = !q ? st.rows : st.rows.filter(r => st.fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+  box.innerHTML = st.renderFn(rows);
+}
+function kotakCariTarifHtml(placeholder){
+  return `<div style="margin-bottom:10px"><input id="tf_cari" oninput="renderFilteredTarifList()" placeholder="${placeholder || 'Cari...'}"></div>`;
+}
 async function pageTarif(el){
   el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, &amp; Tarif Layanan Penunjang per unit (Lab/Radiologi/Gizi/CSSD/Linen/Jenazah). Harga obat Farmasi dikelola di menu Unit Penunjang &gt; tab Farmasi.</p>
     <div class="card">
@@ -4496,6 +4554,7 @@ async function pageTarif(el){
         <button class="btn" onclick="renderTarifTab('jalan')">Rawat Jalan</button>
         ${Object.keys(TARIF_UNIT_LABEL).map(u=>`<button class="btn" onclick="renderTarifTab('${u}')">${TARIF_UNIT_LABEL[u]}</button>`).join("")}
         <button class="btn" onclick="renderTarifTab('unitcost')">🏭 Unit Cost (Biaya Riil RS)</button>
+        <button class="btn" onclick="renderTarifTab('tindakan')">🩺 Tarif Tindakan</button>
         <button class="btn ghost" onclick="bukaFarmasiDariTarif()">💊 Harga Obat Farmasi →</button>
       </div>
       <div id="tarifBody"></div>
@@ -4519,10 +4578,11 @@ async function renderTarifTab(tab){
       <label>Tarif Asuhan Keperawatan</label><input id="tf_asuhan" type="number">
       <label>Kelas Rawat Inap (untuk Billing otomatis)</label><input id="tf_kelasri" placeholder="Isi SAMA PERSIS dengan kolom Kelas di Rawat Inap/Tempat Tidur, cth: 1">
       <p class="hint">Kolom ini menghubungkan baris tarif ini ke kolom "Kelas" yang dipakai di Admisi Rawat Inap/Manajemen Kamar (cth: "1", "2", "3") — supaya sistem tahu tarif kamar/hari mana yang harus dipakai saat menambahkan item Billing "Kamar" otomatis waktu pasien pulang. Kosongkan kalau kelas ini belum mau dipakai untuk fitur otomatis ini.</p>
-      <button class="btn" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0,kelasRawatInap:val('tf_kelasri')},'inap')">Simpan</button>
-      <div id="tfList" style="margin-top:14px"></div>`;
+      <button class="btn" id="tf_btnSimpan" onclick="tfSubmit('tarif.tambahKelasInap',{kode:val('tf_kode'),nama:val('tf_nama'),tarifKamar:Number(val('tf_kamar'))||0,tarifVisiteUmum:Number(val('tf_visu'))||0,tarifVisiteSpesialis:Number(val('tf_viss'))||0,tarifAsuhanKeperawatan:Number(val('tf_asuhan'))||0,kelasRawatInap:val('tf_kelasri')},'inap')">Simpan</button>
+      ${kotakCariTarifHtml('Cari kode/nama kelas...')}
+      <div id="tfList"></div>`;
     const rows = await api('tarif.listRawatInap', {}, 'POST');
-    document.getElementById('tfList').innerHTML = renderTarifInapList(rows);
+    setTarifListState(rows, renderTarifInapList, ['Kode_Kelas','Nama_Kelas']);
   } else if (tab === 'jalan') {
     body.innerHTML = `
       <label>Kode Poli</label><input id="tf_kode">
@@ -4531,9 +4591,10 @@ async function renderTarifTab(tab){
       <label>Tarif Konsultasi Spesialis</label><input id="tf_spesialis" type="number">
       <label>Tarif Administrasi</label><input id="tf_admin" type="number">
       <button class="btn" onclick="tfSubmit('tarif.tambahPoli',{kode:val('tf_kode'),nama:val('tf_nama'),tarifUmum:Number(val('tf_umum'))||0,tarifSpesialis:Number(val('tf_spesialis'))||0,tarifAdministrasi:Number(val('tf_admin'))||0},'jalan')">Simpan</button>
-      <div id="tfList" style="margin-top:14px"></div>`;
+      ${kotakCariTarifHtml('Cari kode/nama poli...')}
+      <div id="tfList"></div>`;
     const rows = await api('tarif.listRawatJalan', {}, 'POST');
-    document.getElementById('tfList').innerHTML = renderTarifJalanList(rows);
+    setTarifListState(rows, renderTarifJalanList, ['Kode_Poli','Nama_Poli']);
   } else if (TARIF_UNIT_LABEL[tab]) {
     // Tab per-unit (lab/radiologi/gizi/cssd/linen/jenazah/lainnya) --
     // semuanya memakai tarif_layanan yang sama, dibedakan lewat kolom "unit".
@@ -4546,10 +4607,38 @@ async function renderTarifTab(tab){
       <label>Satuan</label><input id="tf_satuan" placeholder="Per Pemeriksaan / Per Hari / Per Kasus">
       <label>Tarif (Rp)</label><input id="tf_tarif" type="number">
       <button class="btn" onclick="tfSubmit('tarif.tambahLayanan',{kode:val('tf_kode'),kategori:val('tf_kategori'),nama:val('tf_nama'),satuan:val('tf_satuan'),tarif:Number(val('tf_tarif'))||0,unit:'${tab}'},'${tab}')">Simpan</button>
-      <p class="hint">Isi Kode Layanan yang SAMA PERSIS dengan tarif yang sudah ada kalau bermaksud MENGUBAH harga tarif tsb (bukan menambah baris baru).</p>
-      <div id="tfList" style="margin-top:14px"></div>`;
+      <p class="hint">Isi Kode Layanan yang SAMA PERSIS dengan tarif yang sudah ada kalau bermaksud MENGUBAH harga tarif tsb (bukan menambah baris baru) -- atau klik "Edit" di daftar bawah supaya form terisi otomatis.</p>
+      ${kotakCariTarifHtml('Cari kode/kategori/nama layanan...')}
+      <div id="tfList"></div>`;
     const rows = await api('tarif.listLayanan', {unit: tab}, 'POST');
-    document.getElementById('tfList').innerHTML = renderTarifLayananList(rows, tab);
+    setTarifListState(rows, r => renderTarifLayananList(r, tab), ['Kode_Layanan','Kategori','Nama_Layanan']);
+  } else if (tab === 'tindakan') {
+    // Tarif Tindakan: 4 angka per kode ICD-9-CM (RI/RJ x BPJS/Umum). Begitu
+    // staf mencatat Tindakan ke kunjungan pasien, sistem otomatis membuat
+    // baris Billing dari salah satu dari 4 angka ini sesuai jenis kunjungan
+    // & penjamin pasien -- staf tidak perlu ketik tarif manual lagi.
+    body.innerHTML = `
+      <p class="hint">"Umum" = pasien bayar sendiri (cash-pay)/Asuransi Lain. Kosongkan (0) kombinasi yang belum berlaku untuk tindakan ini — sistem tidak akan membuat tagihan otomatis untuk kombinasi yang masih 0.</p>
+      <input type="hidden" id="tt_editMode" value="0">
+      <div style="position:relative;"><label>Cari Kode ICD-9-CM (Tindakan)</label>
+        <input id="ttCariICD9" placeholder="ketik kode atau nama tindakan..." oninput="cariKode('ttCariICD9','ttSaranICD9',searchICD9API)">
+        <div id="ttSaranICD9" class="suggest-box"></div>
+      </div>
+      <label>Kode ICD-9-CM (terpilih)</label><input id="tt_kode" placeholder="cth: 00.01">
+      <label>Nama Tindakan (opsional, kosongkan untuk pakai deskripsi ICD-9)</label><input id="tt_nama">
+      <div class="row">
+        <div><label>Tarif Rawat Inap — BPJS</label><input id="tt_ri_bpjs" type="number"></div>
+        <div><label>Tarif Rawat Inap — Umum</label><input id="tt_ri_umum" type="number"></div>
+      </div>
+      <div class="row">
+        <div><label>Tarif Rawat Jalan — BPJS</label><input id="tt_rj_bpjs" type="number"></div>
+        <div><label>Tarif Rawat Jalan — Umum</label><input id="tt_rj_umum" type="number"></div>
+      </div>
+      <button class="btn" onclick="submitTarifTindakan()">Simpan</button>
+      <button class="btn ghost" onclick="batalEditTarifTindakan()">Batal / Bersihkan Form</button>
+      ${kotakCariTarifHtml('Cari kode/nama tindakan...')}
+      <div id="tfList"></div>`;
+    await muatTarifTindakanList();
   } else if (tab === 'unitcost') {
     // Unit Cost = biaya riil RS per kode CBG, diisi manual dari studi biaya
     // keuangan internal (BUKAN data resmi BPJS seperti tarif_cbg_referensi
@@ -4566,17 +4655,14 @@ async function renderTarifTab(tab){
         <div><label>Unit Cost Rawat Jalan</label><input id="uc_rj" type="number"></div>
       </div>
       <button class="btn" onclick="submitUnitCost()">Simpan</button>
-      <div id="ucList" style="margin-top:14px"></div>`;
+      ${kotakCariTarifHtml('Cari kode CBG/deskripsi...')}
+      <div id="ucList"></div>`;
     await muatUnitCostList();
   }
 }
-async function muatUnitCostList(){
-  const rows = await api('unitCost.list', {}, 'POST');
-  window.__unitCostCache = rows || [];
-  const box = document.getElementById('ucList');
-  if(!box) return;
-  if(!rows || !rows.length){ box.innerHTML = '<p class="sub">Belum ada data Unit Cost.</p>'; return; }
-  box.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+function renderUnitCostRows(rows){
+  if(!rows || !rows.length) return '<p class="sub">Belum ada data Unit Cost.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
     '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode CBG</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Deskripsi</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 1</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 2</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kelas 3</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ</th><th></th></tr>' +
     rows.map(r=>`<tr>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.kodeCbg)}</td>
@@ -4590,6 +4676,11 @@ async function muatUnitCostList(){
         <button class="btn sm danger" onclick="ucHapus('${r.kodeCbg.replace(/'/g,"\\'")}')">Hapus</button>
       </td>
     </tr>`).join("") + '</table>';
+}
+async function muatUnitCostList(){
+  const rows = await api('unitCost.list', {}, 'POST');
+  window.__unitCostCache = rows || [];
+  setTarifListState(rows, renderUnitCostRows, ['kodeCbg','deskripsi'], 'ucList');
 }
 function ucEdit(kodeCbg){
   const r = (window.__unitCostCache||[]).find(x=>x.kodeCbg===kodeCbg);
@@ -4632,11 +4723,23 @@ function renderTarifLayananList(rows, tab){
       <td style="padding:6px;border-bottom:1px solid var(--line)">Rp ${Number(r.Tarif||0).toLocaleString('id-ID')}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfLayananEdit('${r.Kode_Layanan}','${tab}')">Edit</button>
         <button class="btn sm ghost" onclick="tfSetAktif('${r.Kode_Layanan}',${r.aktif===false},'${tab}')">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
         <button class="btn sm danger" onclick="tfHapusLayanan('${r.Kode_Layanan}','${tab}')">Hapus</button>
       </td>
     </tr>`).join("") + '</table>' +
     '<p class="hint">Tombol "Hapus" hanya berhasil kalau tarif ini belum pernah dipakai di order Lab/Radiologi/Gizi/CSSD/Linen/Jenazah manapun — kalau sudah pernah, sistem menolak &amp; menyarankan "Nonaktifkan" saja.</p>';
+}
+function tfLayananEdit(kode, tab){
+  const r = (window.__tarifListState && window.__tarifListState.rows || []).find(x=>x.Kode_Layanan===kode);
+  if(!r) return;
+  document.getElementById('tf_kode').value = r.Kode_Layanan;
+  document.getElementById('tf_kategori').value = r.Kategori || '';
+  document.getElementById('tf_nama').value = r.Nama_Layanan || '';
+  document.getElementById('tf_satuan').value = r.Satuan || '';
+  document.getElementById('tf_tarif').value = r.Tarif || 0;
+  document.getElementById('tf_kode').scrollIntoView({behavior:'smooth', block:'center'});
+  toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
 }
 async function tfHapusLayanan(kode, tab){
   if(!confirm(`Hapus permanen tarif "${kode}"?\n\nHanya berhasil kalau tarif ini belum pernah dipakai di order manapun.`)) return;
@@ -4661,11 +4764,25 @@ function renderTarifInapList(rows){
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kelas_Rawat_Inap ?? ''}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfInapEdit('${r.Kode_Kelas}')">Edit</button>
         <button class="btn sm ghost" onclick="tfInapSetAktif('${r.Kode_Kelas}',${r.aktif===false})">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
         <button class="btn sm danger" onclick="tfInapHapus('${r.Kode_Kelas}')">Hapus</button>
       </td>
     </tr>`).join("") + '</table>' +
     '<p class="hint">Tombol "Hapus" hanya berhasil kalau kelas ini belum pernah dipakai di data Rawat Inap manapun.</p>';
+}
+function tfInapEdit(kode){
+  const r = (window.__tarifListState && window.__tarifListState.rows || []).find(x=>x.Kode_Kelas===kode);
+  if(!r) return;
+  document.getElementById('tf_kode').value = r.Kode_Kelas;
+  document.getElementById('tf_nama').value = r.Nama_Kelas || '';
+  document.getElementById('tf_kamar').value = r.Tarif_Kamar_Per_Hari || 0;
+  document.getElementById('tf_visu').value = r.Tarif_Visite_Dokter_Umum || 0;
+  document.getElementById('tf_viss').value = r.Tarif_Visite_Dokter_Spesialis || 0;
+  document.getElementById('tf_asuhan').value = r.Tarif_Asuhan_Keperawatan || 0;
+  document.getElementById('tf_kelasri').value = r.Kelas_Rawat_Inap || '';
+  document.getElementById('tf_kode').scrollIntoView({behavior:'smooth', block:'center'});
+  toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
 }
 async function tfInapSetAktif(kode, aktifBaru){
   const r = await api('tarif.setAktifInap', {kode, aktif: aktifBaru}, 'POST');
@@ -4681,19 +4798,32 @@ async function tfInapHapus(kode){
 function renderTarifJalanList(rows){
   if(!rows || !rows.length) return '<p class="sub">Belum ada data.</p>';
   return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
-    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Spesialis</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama_Poli</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Konsultasi_Spesialis</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Tarif_Administrasi</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
     rows.map(r => `<tr${r.aktif===false?' style="color:var(--muted)"':''}>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Kode_Poli}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Nama_Poli}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Konsultasi_Umum ?? ''}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Konsultasi_Spesialis ?? ''}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.Tarif_Administrasi ?? ''}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
       <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick="tfJalanEdit('${r.Kode_Poli}')">Edit</button>
         <button class="btn sm ghost" onclick="tfJalanSetAktif('${r.Kode_Poli}',${r.aktif===false})">${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
         <button class="btn sm danger" onclick="tfJalanHapus('${r.Kode_Poli}')">Hapus</button>
       </td>
     </tr>`).join("") + '</table>' +
     '<p class="hint">Tombol "Hapus" hanya berhasil kalau poli ini kemungkinan belum pernah dipakai di kunjungan manapun (dicocokkan dari nama poli).</p>';
+}
+function tfJalanEdit(kode){
+  const r = (window.__tarifListState && window.__tarifListState.rows || []).find(x=>x.Kode_Poli===kode);
+  if(!r) return;
+  document.getElementById('tf_kode').value = r.Kode_Poli;
+  document.getElementById('tf_nama').value = r.Nama_Poli || '';
+  document.getElementById('tf_umum').value = r.Tarif_Konsultasi_Umum || 0;
+  document.getElementById('tf_spesialis').value = r.Tarif_Konsultasi_Spesialis || 0;
+  document.getElementById('tf_admin').value = r.Tarif_Administrasi || 0;
+  document.getElementById('tf_kode').scrollIntoView({behavior:'smooth', block:'center'});
+  toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
 }
 async function tfJalanSetAktif(kode, aktifBaru){
   const r = await api('tarif.setAktifJalan', {kode, aktif: aktifBaru}, 'POST');
@@ -4705,6 +4835,77 @@ async function tfJalanHapus(kode){
   const r = await api('tarif.hapusJalan', {kode}, 'POST');
   toast(r.ok ? 'Poli dihapus' : (r.msg || 'Gagal menghapus'));
   if(r.ok) renderTarifTab('jalan');
+}
+
+function renderTarifTindakanList(rows){
+  if(!rows || !rows.length) return '<p class="sub">Belum ada Tarif Tindakan. Cari kode ICD-9-CM di atas lalu isi form untuk menambahkan.</p>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+    '<tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Kode ICD-9</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Nama Tindakan</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RI-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-BPJS</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">RJ-Umum</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--line)">Status</th><th></th></tr>' +
+    rows.map(r=>`<tr>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.kodeIcd9)}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${esc(r.namaTindakan||r.deskripsiIcd9||'-')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRiBpjs||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRiUmum||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjBpjs||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">Rp${Number(r.tarifRjUmum||0).toLocaleString('id-ID')}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line)">${r.aktif===false ? '<span style="color:var(--muted)">Nonaktif</span>' : '<span style="color:#0a7a3d">Aktif</span>'}</td>
+      <td style="padding:6px;border-bottom:1px solid var(--line);white-space:nowrap">
+        <button class="btn sm ghost" onclick='tfTindakanEdit(${JSON.stringify(r.kodeIcd9)})'>Edit</button>
+        <button class="btn sm ghost" onclick='tfTindakanSetAktif(${JSON.stringify(r.kodeIcd9)},${r.aktif===false})'>${r.aktif===false?'Aktifkan':'Nonaktifkan'}</button>
+        <button class="btn sm danger" onclick='tfTindakanHapus(${JSON.stringify(r.kodeIcd9)})'>Hapus</button>
+      </td>
+    </tr>`).join("") + '</table>';
+}
+async function muatTarifTindakanList(){
+  const rows = await api('tarifTindakan.list', {}, 'POST');
+  window.__tarifTindakanCache = rows || [];
+  setTarifListState(rows, renderTarifTindakanList, ['kodeIcd9','namaTindakan','deskripsiIcd9'], 'tfList');
+}
+async function submitTarifTindakan(){
+  const kodeIcd9 = val('tt_kode');
+  if(!kodeIcd9){ toast('Pilih dulu Kode ICD-9-CM dari saran pencarian'); return; }
+  const r = await api('tarifTindakan.simpan', {
+    kodeIcd9, namaTindakan: val('tt_nama'),
+    tarifRiBpjs: Number(val('tt_ri_bpjs'))||0, tarifRiUmum: Number(val('tt_ri_umum'))||0,
+    tarifRjBpjs: Number(val('tt_rj_bpjs'))||0, tarifRjUmum: Number(val('tt_rj_umum'))||0
+  }, 'POST');
+  if(r.ok){ toast('Tarif Tindakan tersimpan'); batalEditTarifTindakan(); await muatTarifTindakanList(); }
+  else toast(r.msg || 'Gagal menyimpan');
+}
+function batalEditTarifTindakan(){
+  document.getElementById('tt_editMode').value = '0';
+  document.getElementById('ttCariICD9').value = '';
+  document.getElementById('tt_kode').value = '';
+  document.getElementById('tt_nama').value = '';
+  document.getElementById('tt_ri_bpjs').value = '';
+  document.getElementById('tt_ri_umum').value = '';
+  document.getElementById('tt_rj_bpjs').value = '';
+  document.getElementById('tt_rj_umum').value = '';
+}
+function tfTindakanEdit(kodeIcd9){
+  const r = (window.__tarifTindakanCache||[]).find(x=>x.kodeIcd9===kodeIcd9);
+  if(!r) return;
+  document.getElementById('tt_editMode').value = '1';
+  document.getElementById('ttCariICD9').value = kodeIcd9 + ' — ' + (r.namaTindakan||r.deskripsiIcd9||'');
+  document.getElementById('tt_kode').value = r.kodeIcd9;
+  document.getElementById('tt_nama').value = r.namaTindakan||'';
+  document.getElementById('tt_ri_bpjs').value = r.tarifRiBpjs||0;
+  document.getElementById('tt_ri_umum').value = r.tarifRiUmum||0;
+  document.getElementById('tt_rj_bpjs').value = r.tarifRjBpjs||0;
+  document.getElementById('tt_rj_umum').value = r.tarifRjUmum||0;
+  document.getElementById('tt_kode').scrollIntoView({behavior:'smooth', block:'center'});
+  toast('Data dimuat ke form di atas — ubah lalu klik Simpan untuk memperbarui');
+}
+async function tfTindakanSetAktif(kodeIcd9, aktifBaru){
+  const r = await api('tarifTindakan.setAktif', {kodeIcd9, aktif: aktifBaru}, 'POST');
+  toast(r.ok ? (aktifBaru ? 'Tarif Tindakan diaktifkan kembali' : 'Tarif Tindakan dinonaktifkan') : (r.msg || 'Gagal menyimpan'));
+  if(r.ok) await muatTarifTindakanList();
+}
+async function tfTindakanHapus(kodeIcd9){
+  if(!confirm(`Hapus permanen Tarif Tindakan untuk kode "${kodeIcd9}"?`)) return;
+  const r = await api('tarifTindakan.hapus', {kodeIcd9}, 'POST');
+  toast(r.ok ? 'Tarif Tindakan dihapus' : (r.msg || 'Gagal menghapus'));
+  if(r.ok) await muatTarifTindakanList();
 }
 
 async function tfSubmit(action, data, tab){
@@ -4779,6 +4980,7 @@ async function pageKamarOperasi(el){
       <div><label>Sampai Tanggal</label><input type="date" id="joSampai"></div>
     </div>
     <button class="btn sm" onclick="muatJadwalOperasi()">Tampilkan</button>
+    ${kotakCariHtml('jadwalOperasiList', 'Cari nama tindakan/pasien/operator...')}
     <div id="jadwalOperasiList" style="margin-top:10px">Memuat...</div>`;
   const now = new Date();
   document.getElementById("joDari").value = now.toISOString().slice(0,10);
@@ -4814,9 +5016,12 @@ async function muatJadwalOperasi(){
   box.innerHTML = "Memuat...";
   const bolehKelola = state.user.role === 'admin' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('ok');
   const rows = await api("operasi.jadwalList", {dari: val("joDari"), sampai: val("joSampai")}, "POST");
-  if(!rows || !rows.length){ box.innerHTML = `<div class="empty">Tidak ada jadwal operasi pada periode ini.</div>`; return; }
+  setListSearchState('jadwalOperasiList', rows, r2 => renderJadwalOperasiRows(r2, bolehKelola), ['namaTindakanOperasi','namaPasien','noRm','dokterOperator','dokterAnestesi','ruangOperasi']);
+}
+function renderJadwalOperasiRows(rows, bolehKelola){
+  if(!rows || !rows.length) return `<div class="empty">Tidak ada jadwal operasi pada periode ini.</div>`;
   const statusBadge = {Dijadwalkan:"warn", Selesai:"ok", Dibatalkan:"danger"};
-  box.innerHTML = rows.map(jo => `
+  return rows.map(jo => `
     <div class="card" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div><b>${jo.namaTindakanOperasi}</b> — ${jo.namaPasien} (RM ${jo.noRm})</div>
@@ -4915,6 +5120,7 @@ async function pageJadwalJaga(el){
         <button class="btn sm ghost" onclick="batalEditJadwalJaga()">Batal Ubah</button>
       </div>
     </div>` : ""}
+    ${kotakCariHtml('jjList', 'Cari petugas/unit/peran...')}
     <div id="jjList"></div>`;
   const now = new Date();
   document.getElementById("jj_dari").value = now.toISOString().slice(0,10);
@@ -4930,8 +5136,11 @@ async function muatJadwalJaga(){
   if(!box) return;
   const bolehKelola = state.user.role === 'admin' || (state.user.modul||[]).includes('jadwaljaga');
   const rows = await api('jadwalJaga.list', {dari: val('jj_dari'), sampai: val('jj_sampai'), unitPoli: val('jj_unit')||undefined}, 'GET');
-  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Tidak ada jadwal jaga pada periode ini.</div>`; return; }
-  box.innerHTML = `<div class="card"><table>
+  setListSearchState('jjList', rows, r2 => renderJadwalJagaRows(r2, bolehKelola), ['unitPoli','nama','peran','catatan']);
+}
+function renderJadwalJagaRows(rows, bolehKelola){
+  if(!rows || !rows.length) return `<div class="card empty">Tidak ada jadwal jaga pada periode ini.</div>`;
+  return `<div class="card"><table>
     <tr><th>Tanggal</th><th>Shift</th><th>Unit/Poli</th><th>Petugas</th><th>Peran</th><th>Catatan</th><th>Dicatat Oleh</th>${bolehKelola?'<th></th>':''}</tr>
     ${rows.map(j=>`<tr>
       <td>${new Date(j.tanggal).toLocaleDateString('id-ID')}</td><td>${j.shift}</td><td>${j.unitPoli||'-'}</td>
@@ -5011,6 +5220,7 @@ async function pagePpi(el){
         <button class="btn sm ghost" onclick="batalEditPpi()">Batal Ubah</button>
       </div>
     </div>` : ""}
+    ${kotakCariHtml('ppiList', 'Cari No. RM/pasien/jenis infeksi/lokasi...')}
     <div id="ppiList"></div>`;
   const now = new Date();
   document.getElementById("ppi_dari").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
@@ -5037,8 +5247,11 @@ async function muatPpi(){
   } else { rekapBox.innerHTML = `<div class="empty">${(rekap&&rekap.msg)||'Gagal memuat rekap'}</div>`; }
 
   const rows = await api('ppi.list', {dari, sampai, jenisInfeksi: jenis||undefined}, 'GET');
-  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Tidak ada catatan infeksi pada periode ini.</div>`; return; }
-  box.innerHTML = `<div class="card"><table>
+  setListSearchState('ppiList', rows, r2 => renderPpiRows(r2, bolehCatat), ['noRm','namaPasien','jenisInfeksi','lokasiInfeksi','faktorRisiko']);
+}
+function renderPpiRows(rows, bolehCatat){
+  if(!rows || !rows.length) return `<div class="card empty">Tidak ada catatan infeksi pada periode ini.</div>`;
+  return `<div class="card"><table>
     <tr><th>Tanggal</th><th>No. RM</th><th>Pasien</th><th>Jenis Infeksi</th><th>Hari Rawat Ke</th><th>Lokasi</th><th>Faktor Risiko</th><th>Tindak Lanjut</th><th>Dilaporkan Oleh</th>${bolehCatat?'<th></th>':''}</tr>
     ${rows.map(r=>`<tr>
       <td>${new Date(r.tanggalDitemukan).toLocaleDateString('id-ID')}</td><td>${r.noRm}</td><td>${r.namaPasien}</td>
@@ -5115,6 +5328,7 @@ async function pageAlatMedis(el){
         <div><label>Filter Status</label><select id="am_filter_status" onchange="muatAlatMedis()"><option value="">Semua</option><option>Baik</option><option>Rusak</option><option>Dalam Perbaikan</option><option>Tidak Dipakai</option></select></div>
       </div>
     </div>
+    ${kotakCariHtml('alatMedisList', 'Cari kode/nama alat/lokasi...')}
     <div id="alatMedisList"></div>
     <div id="riwayatKalibrasiBox" style="margin-top:16px"></div>`;
   if(bolehKelola) document.getElementById("am_k_tanggal").value = new Date().toISOString().slice(0,10);
@@ -5136,8 +5350,11 @@ async function muatAlatMedis(){
     const sel = document.getElementById('am_k_alatId');
     if(sel) sel.innerHTML = (rows||[]).map(a=>`<option value="${a.id}">${a.kodeAlat} — ${a.namaAlat}</option>`).join("") || `<option value="">Belum ada alat</option>`;
   }
-  if(!rows || !rows.length){ box.innerHTML = `<div class="card empty">Belum ada alat medis terdaftar.</div>`; return; }
-  box.innerHTML = `<div class="card"><table>
+  setListSearchState('alatMedisList', rows, renderAlatMedisRows, ['kodeAlat','namaAlat','lokasi']);
+}
+function renderAlatMedisRows(rows){
+  if(!rows || !rows.length) return `<div class="card empty">Belum ada alat medis terdaftar.</div>`;
+  return `<div class="card"><table>
     <tr><th>Kode</th><th>Nama Alat</th><th>Lokasi</th><th>Status</th><th>Kalibrasi Terakhir</th><th>Kalibrasi Berikutnya</th><th>Status Kalibrasi</th><th></th></tr>
     ${rows.map(a=>`<tr>
       <td>${a.kodeAlat}</td><td>${a.namaAlat}</td><td>${a.lokasi||'-'}</td>
@@ -5524,6 +5741,7 @@ async function pagePengadaanObat(el){
         <input id="supplierNpwpBaru" placeholder="NPWP (opsional)">
       </div>
       <button class="btn sm" style="margin-top:6px" onclick="submitSimpanSupplier()">+ Tambah Supplier</button>` : ''}
+      ${kotakCariHtml('supplierListBox', 'Cari nama/kontak/alamat supplier...')}
       <div id="supplierListBox" style="margin-top:10px">Memuat...</div>
     </div>
 
@@ -5536,6 +5754,7 @@ async function pagePengadaanObat(el){
       <select id="spFilterStatus" onchange="muatDaftarSp()">
         <option value="">Semua Status</option><option>Draft</option><option>Dikirim</option><option>Diterima Sebagian</option><option>Selesai</option><option>Dibatalkan</option>
       </select>
+      ${kotakCariHtml('spListBox', 'Cari No. SP/nama supplier...')}
       <div id="spListBox" style="margin-top:8px">Memuat...</div>
     </div>
 
@@ -5565,6 +5784,7 @@ async function pagePengadaanObat(el){
       <div id="penerimaanCartBox" style="margin-top:8px"></div>
       <button class="btn" style="margin-top:10px" onclick="submitCatatPenerimaan()">Simpan Penerimaan</button>
       <div class="section-title" style="margin-top:16px">Riwayat Penerimaan</div>
+      ${kotakCariHtml('penerimaanListBox', 'Cari No. Penerimaan/No. SP/supplier...')}
       <div id="penerimaanListBox">Memuat...</div>
     </div>
 
@@ -5638,8 +5858,11 @@ async function muatSupplierPengadaan(){
   const box = document.getElementById('supplierListBox'); if(!box) return;
   const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
   const rows = await api('farmasi.supplierList', {}, 'POST');
-  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada supplier terdaftar</div>'; return; }
-  box.innerHTML = `<table><tr><th>Nama</th><th>Kontak</th><th>Alamat</th><th>NPWP</th><th>Status</th>${bolehKelola?'<th></th>':''}</tr>
+  setListSearchState('supplierListBox', rows, r2 => renderSupplierRows(r2, bolehKelola), ['nama','kontak','alamat','npwp']);
+}
+function renderSupplierRows(rows, bolehKelola){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada supplier terdaftar</div>';
+  return `<table><tr><th>Nama</th><th>Kontak</th><th>Alamat</th><th>NPWP</th><th>Status</th>${bolehKelola?'<th></th>':''}</tr>
     ${rows.map(s=>`<tr${s.aktif===false?' style="opacity:0.55"':''}>
       <td>${esc(s.nama)}</td><td>${esc(s.kontak||'-')}</td><td>${esc(s.alamat||'-')}</td><td>${esc(s.npwp||'-')}</td>
       <td>${s.aktif===false?'<span class="badge muted">Nonaktif</span>':'<span class="badge ok">Aktif</span>'}</td>
@@ -5735,9 +5958,12 @@ async function muatDaftarSp(){
   const box = document.getElementById('spListBox'); if(!box) return;
   const status = val('spFilterStatus');
   const rows = await api('farmasi.spList', {status}, 'POST');
-  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada Surat Pesanan</div>'; return; }
+  setListSearchState('spListBox', rows, renderSpRows, ['noSp','namaSupplier','status']);
+}
+function renderSpRows(rows){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada Surat Pesanan</div>';
   const badgeKelas = {Draft:'muted', Dikirim:'warn', 'Diterima Sebagian':'warn', Selesai:'ok', Dibatalkan:'danger'};
-  box.innerHTML = `<table><tr><th>No. SP</th><th>Tanggal</th><th>Supplier</th><th>Jml Item</th><th>Status</th><th></th></tr>
+  return `<table><tr><th>No. SP</th><th>Tanggal</th><th>Supplier</th><th>Jml Item</th><th>Status</th><th></th></tr>
     ${rows.map(sp=>`<tr>
       <td>${sp.noSp}</td><td>${new Date(sp.tanggalPesan).toLocaleDateString('id-ID')}</td><td>${esc(sp.namaSupplier||'-')}</td><td>${sp.jumlahItem}</td>
       <td><span class="badge ${badgeKelas[sp.status]||'muted'}">${sp.status}</span></td>
@@ -5820,13 +6046,16 @@ async function submitCatatPenerimaan(){
     goTo('pengadaanobat');
   } else toast(r.msg || 'Gagal mencatat penerimaan');
 }
+function renderPenerimaanRows(rows){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada riwayat penerimaan</div>';
+  return `<table><tr><th>No. Penerimaan</th><th>Tanggal</th><th>No. SP</th><th>Supplier</th><th>Jml Item</th><th>Catatan</th></tr>
+    ${rows.map(p=>`<tr><td>${p.noPenerimaan}</td><td>${new Date(p.tanggalTerima).toLocaleDateString('id-ID')}</td><td>${p.noSp||'-'}</td><td>${esc(p.namaSupplier||'-')}</td><td>${p.jumlahItem}</td><td>${esc(p.catatan||'-')}</td></tr>`).join("")}
+  </table>`;
+}
 async function muatDaftarPenerimaan(){
   const box = document.getElementById('penerimaanListBox'); if(!box) return;
   const rows = await api('farmasi.penerimaanList', {}, 'POST');
-  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada riwayat penerimaan</div>'; return; }
-  box.innerHTML = `<table><tr><th>No. Penerimaan</th><th>Tanggal</th><th>No. SP</th><th>Supplier</th><th>Jml Item</th><th>Catatan</th></tr>
-    ${rows.map(p=>`<tr><td>${p.noPenerimaan}</td><td>${new Date(p.tanggalTerima).toLocaleDateString('id-ID')}</td><td>${p.noSp||'-'}</td><td>${esc(p.namaSupplier||'-')}</td><td>${p.jumlahItem}</td><td>${esc(p.catatan||'-')}</td></tr>`).join("")}
-  </table>`;
+  setListSearchState('penerimaanListBox', rows, renderPenerimaanRows, ['noPenerimaan','noSp','namaSupplier','catatan']);
   // isi juga dropdown SP yang boleh dipilih (Dikirim/Diterima Sebagian) untuk form penerimaan
   const spTerbuka = await api('farmasi.spList', {}, 'POST');
   const sel = document.getElementById('penerimaanSpId');
@@ -5939,6 +6168,7 @@ async function renderCpTab(tab){
         <button class="btn" style="margin-top:12px" onclick="submitTemplateCp()">Simpan Template</button>
         <button class="btn ghost" style="margin-top:12px" onclick="batalEditTemplateCp()">Batal / Bersihkan Form</button>
       </div>` : ''}
+      ${kotakCariHtml('cpTemplateList', 'Cari nama CP/kode ICD-10...')}
       <div id="cpTemplateList">Memuat...</div>`;
     if(boleh) renderCpBuilderList();
     await muatCpTemplateList();
@@ -6005,10 +6235,12 @@ async function submitTemplateCp(){
 async function muatCpTemplateList(){
   const rows = await api('cp.templateList', {}, 'POST');
   window.__cpTemplateCache = rows || [];
-  const box = document.getElementById('cpTemplateList'); if(!box) return;
+  setListSearchState('cpTemplateList', rows, renderCpTemplateRows, ['namaCp','kodeIcd10','deskripsiIcd10']);
+}
+function renderCpTemplateRows(rows){
   const boleh = cpBolehKelola();
-  if(!rows || !rows.length){ box.innerHTML = '<div class="empty">Belum ada Template Clinical Pathway.</div>'; return; }
-  box.innerHTML = `<table><tr><th>Nama CP</th><th>ICD-10</th><th>Lama Hari</th><th>Estimasi Biaya</th><th>Sumber</th><th>Status</th><th></th></tr>
+  if(!rows || !rows.length) return '<div class="empty">Belum ada Template Clinical Pathway.</div>';
+  return `<table><tr><th>Nama CP</th><th>ICD-10</th><th>Lama Hari</th><th>Estimasi Biaya</th><th>Sumber</th><th>Status</th><th></th></tr>
     ${rows.map(t=>`<tr${t.aktif===false?' style="color:var(--muted)"':''}>
       <td>${esc(t.namaCp)}</td>
       <td>${t.kodeIcd10 ? esc(t.kodeIcd10)+' — '+esc(t.deskripsiIcd10||'') : '-'}</td>
@@ -6094,7 +6326,7 @@ async function cariKunjunganCp(){
   if(!rows.length){ box.innerHTML = '<p class="sub">Tidak ada kunjungan aktif yang cocok.</p>'; return; }
   box.innerHTML = rows.map(k=>`<div class="flag-item" style="display:flex;justify-content:space-between;align-items:center">
     <span>${esc(k.rm||k.RM)} — ${esc(k.nama||k.Nama||'-')} (${esc(k.jenisKunjungan||k.JenisKunjungan)}, ${esc(k.poliRuangan||k.PoliRuangan||'-')})</span>
-    <button class="btn sm" onclick="pilihKunjunganCp('${k.KunjunganID}')">Pilih →</button>
+    <button class="btn sm" onclick="pilihKunjunganCp('${k.id}')">Pilih →</button>
   </div>`).join("");
 }
 async function pilihKunjunganCp(kunjunganId){
@@ -6107,7 +6339,7 @@ async function renderCpKunjunganTerpilih(){
   const kunjunganId = window.__cpKunjunganTerpilih;
   const box = document.getElementById('cpKunjunganTerpilihBox');
   if(!kunjunganId){ box.innerHTML=''; return; }
-  const k = (window.__cpKunjunganCache||[]).find(x=>x.KunjunganID===kunjunganId);
+  const k = (window.__cpKunjunganCache||[]).find(x=>x.id===kunjunganId);
   const boleh = cpBolehKelola();
   const daftar = await api('cp.daftarPenerapanKunjungan', {kunjunganId}, 'POST');
   const adaAktif = (daftar||[]).some(d=>d.status==='Aktif');
