@@ -93,6 +93,8 @@
   .suggest-item{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line);}
   .suggest-item:last-child{border-bottom:none;}
   .suggest-item:hover{background:var(--teal-lt);}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(18,36,43,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;z-index:50;}
+  .modal{background:var(--panel);border-radius:var(--radius);padding:20px 22px;max-width:560px;width:100%;box-shadow:0 12px 30px rgba(0,0,0,.2);}
   .suggest-item b{color:var(--teal-dk);}
 
   /* Login screen */
@@ -193,6 +195,7 @@ const NAV = [
 {id:"ppi", label:"🦠 Surveilans Infeksi (PPI)", step:null},
 {id:"alatmedis", label:"🛠️ Kalibrasi Alat Medis", step:null},
 {id:"laporanrl", label:"📊 Laporan RL", step:null},
+{id:"verifikasiklaim", label:"🔍 Verifikasi Klaim", step:null},
 ];
 
 // Peta akses per role. "admin" selalu dapat semua menu.
@@ -205,10 +208,10 @@ const ROLE_ACCESS = {
   // navAllowed() di bawah diam-diam memberi mereka SEMUA menu admin (fallback
   // "|| ROLE_ACCESS.admin"). RLS di database tetap menolak aksi yang tidak sah,
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
-  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi"],
+  rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi","verifikasiklaim"],
   perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd"],
   kasir: ["dashboard","kunjungan","billing","penunjang","tarif"],
-verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan"],
+verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan","verifikasiklaim"],
 };
 // Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
 // bisa mencentang modul satu per satu per staf lewat halaman "Kelola Hak
@@ -219,7 +222,7 @@ const MODUL_KE_NAV = {
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
   lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
-  ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"]
+  ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"], verifikasiklaim:["verifikasiklaim"]
 };
 // Daftar modul yang bisa dicentang admin di halaman "Kelola Hak Akses".
 const DAFTAR_MODUL = [
@@ -248,6 +251,7 @@ const DAFTAR_MODUL = [
   {id:"ppi", label:"Surveilans Infeksi RS / PPI (catat & lihat rekap infeksi)"},
   {id:"alatmedis", label:"Kalibrasi & Perawatan Alat Medis (kelola alat + catat kalibrasi)"},
   {id:"pelaporan", label:"Laporan RL untuk SIRS Online (lihat laporan RL3/RL4/RL5)"},
+  {id:"verifikasiklaim", label:"Verifikasi Klaim — Skrining Risiko Upcoding (lihat & kelola hasil skrining klaim)"},
   {id:"lihat_nik", label:"⚠️ Lihat NIK Lengkap Pasien (sensitif, wajib 2FA)"},
 ];
 function navAllowed(){
@@ -1001,7 +1005,7 @@ function render(){
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
     suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
-    ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl
+    ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -1549,6 +1553,10 @@ async function submitPersetujuanUmum(kunjunganId){
 }
 
 function val(id){ return document.getElementById(id).value.trim(); }
+// Dipakai di halaman Verifikasi Klaim untuk menampilkan data yang diimpor
+// dari sistem luar (CSV) dengan aman -- data dari luar SIMRS sebaiknya
+// selalu di-escape sebelum ditaruh sebagai innerHTML.
+function esc(s){ if(s===undefined||s===null) return ''; return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* ============ Pencarian kode ICD-10 / ICD-9-CM ============ */
 let searchDebounce;
@@ -5192,6 +5200,206 @@ async function muatRl5(){
       <div><b>Per Cara Bayar</b><br>${(r.totalPerCaraBayar||[]).map(x=>`${x.caraBayar}: ${x.jumlah}`).join('<br>') || '-'}</div>
       <div><b>Rawat Jalan Baru/Lama</b><br>Baru: ${r.rawatJalanBaruLama?.pasienBaru ?? 0}<br>Lama: ${r.rawatJalanBaruLama?.pasienLama ?? 0}</div>
     </div>`;
+}
+
+/* ================= VERIFIKASI KLAIM — SKRINING RISIKO UPCODING ================= */
+// Label Indonesia untuk tiap kode flag — dipakai persis sama seperti di
+// aplikasi terpisah "Sistem Terintegrasi INA-CBG v2" (tab Skrining) supaya
+// istilahnya konsisten buat staf yang dulu terbiasa pakai aplikasi itu.
+const SKRINING_FLAG_LABELS = {
+  severityNoCC: 'Severity II/III tanpa CC/MCC jelas',
+  losShortForSeverity: 'LOS lebih pendek dari perkiraan severity',
+  highRiskDxNoEvidence: 'Diagnosis rawan-upcoding tanpa bukti penunjang',
+  tooManySecondaryDx: 'Diagnosis sekunder terlalu banyak (>8)',
+  surgicalNoProcedure: 'Ada tindakan tanpa kode prosedur',
+  tariffOutlierStat: 'Tarif outlier statistik (kode CBG sama)',
+  losOutlier: 'LOS outlier statistik (kode CBG sama)',
+  tariffAboveOfficial: 'Tarif melebihi tarif resmi',
+  readmission: 'Readmisi <5 hari',
+  icd10FormatInvalid: 'Ada kode ICD-10 tidak dikenali',
+  icd9CategoryUnknown: 'Ada kode ICD-9-CM tidak dikenali',
+  severityCodeMismatch: 'Akhiran kode CBG tidak cocok severity',
+  dpjpPattern: 'Pola skor DPJP di atas rata-rata (case-mix disesuaikan)',
+};
+function skriningTingkatBadge(t){
+  const cls = t==='Tinggi' ? 'danger' : (t==='Sedang' ? 'warn' : 'ok');
+  return `<span class="badge ${cls}">${t}</span>`;
+}
+async function pageVerifikasiKlaim(el){
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'verifikator';
+  el.innerHTML = `<h1>🔍 Verifikasi Klaim — Skrining Risiko Upcoding</h1>
+    <p class="sub">Hasil skrining risiko upcoding klaim, dipindahkan dari aplikasi "Sistem Terintegrasi INA-CBG v2" supaya bisa dilihat langsung di sini bersama rekam medis pasien. Klaim ditautkan ke pasien SIMRS lewat No. RM secara otomatis saat diimpor.</p>
+    <div class="grid cols4" id="skriningKpi"></div>
+    ${bolehKelola ? `
+    <div class="card" style="margin:12px 0">
+      <div class="section-title">📥 Impor dari CSV (aplikasi INA-CBG v2)</div>
+      <p class="hint">Ekspor CSV dari aplikasi INA-CBG v2 (tombol Ekspor CSV di tab Skrining, atau lewat SQL Editor Supabase proyek itu), lalu unggah di sini. Klaim yang sudah ditandai "Sudah Ditinjau"/"Dikoreksi" TIDAK akan ditimpa kalau file yang sama diimpor ulang.</p>
+      <input type="file" id="skriningCsvFile" accept=".csv,text/csv">
+      <button class="btn sm" style="margin-top:8px" onclick="imporCsvSkrining()">Impor CSV</button>
+      <div id="skriningImporHasil" class="hint" style="margin-top:6px"></div>
+    </div>` : ''}
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div><label>Cari (No. RM / Nama / DPJP / Diagnosa)</label><input id="skrining_q" oninput="muatSkrining()" placeholder="Ketik untuk mencari..."></div>
+        <div><label>Tingkat Risiko</label><select id="skrining_tingkat" onchange="muatSkrining()">
+          <option value="">Semua</option><option value="Tinggi">Tinggi</option><option value="Sedang">Sedang</option><option value="Rendah">Rendah</option>
+        </select></div>
+      </div>
+    </div>
+    <div id="skriningBody" class="card"></div>
+    <div id="skriningDetailPanel"></div>`;
+  await muatSkrining();
+}
+async function muatSkrining(){
+  const kpiEl = document.getElementById('skriningKpi');
+  const bodyEl = document.getElementById('skriningBody');
+  if(!kpiEl || !bodyEl) return;
+  const r = await api('klaimSkrining.list', {q: val('skrining_q'), tingkat: val('skrining_tingkat')}, 'GET');
+  if(!r || !r.ok){ bodyEl.innerHTML = `<div class="empty">Gagal memuat data (${r&&r.msg||'tidak diketahui'}).</div>`; return; }
+  window._skriningData = r.data;
+  kpiEl.innerHTML = `
+    <div class="card stat"><b>${r.total}</b><span>Total Klaim Diskrining</span></div>
+    <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.tinggi}</b><span>Risiko Tinggi</span></div>
+    <div class="card stat"><b>${r.sedang}</b><span>Risiko Sedang</span></div>
+    <div class="card stat"><b>${r.rendah}</b><span>Risiko Rendah</span></div>
+  `;
+  if(!r.data.length){ bodyEl.innerHTML = `<div class="empty">Belum ada klaim yang diskrining, atau tidak ada yang cocok filter.</div>`; return; }
+  bodyEl.innerHTML = `<table><tr><th>No. RM</th><th>Pasien</th><th>DPJP</th><th>Dx Utama</th><th>Skor</th><th>Tingkat</th><th>Jml. Flag</th><th>Status</th><th></th></tr>
+    ${r.data.map(x => {
+      const statusBadge = x.statusTindakLanjut==='dikoreksi' ? '<span class="badge ok">Dikoreksi</span>'
+        : x.statusTindakLanjut==='sudah_ditinjau' ? '<span class="badge muted">Sudah Ditinjau</span>'
+        : '<span class="badge warn">Belum Ditinjau</span>';
+      return `<tr>
+        <td>${esc(x.noRm)}</td><td>${esc(x.namaPasien||'-')}</td><td>${esc(x.dpjp||'-')}</td><td>${esc(x.dxUtama||'-')}</td>
+        <td>${x.skor}</td><td>${skriningTingkatBadge(x.tingkat)}</td><td>${(x.flags||[]).length}</td><td>${statusBadge}</td>
+        <td><button class="btn sm ghost" onclick="bukaDetailSkrining('${x.id}')">Detail</button></td>
+      </tr>`;
+    }).join("")}
+  </table>`;
+}
+function bukaDetailSkrining(id){
+  const row = (window._skriningData||[]).find(r => r.id === id);
+  const panel = document.getElementById('skriningDetailPanel');
+  if(!row || !panel) return;
+  const bolehKelola = state.user.role === 'admin' || state.user.role === 'verifikator';
+  panel.innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this) this.remove()">
+      <div class="modal">
+        <h2 style="margin-top:0">${esc(row.namaPasien||row.noRm)}</h2>
+        <p class="hint">No. RM: ${esc(row.noRm)} · ${esc(row.dxUtama||'-')} · DPJP: ${esc(row.dpjp||'-')} · Status Klaim: ${esc(row.statusKlaim||'-')}</p>
+        ${row.pasienId
+          ? `<button class="btn sm ghost" onclick="this.closest('.modal-backdrop').remove(); bukaRekamMedisDariSkrining('${row.pasienId}','${row.kunjunganId||''}')">📂 Buka Rekam Medis Pasien</button>`
+          : `<p class="hint" style="color:var(--red)">⚠️ Pasien tidak ditemukan di SIMRS lewat No. RM ini — cek kembali kecocokan No. RM secara manual.</p>`}
+        <div class="section-title" style="margin-top:14px">Flag Terdeteksi (skor total: ${row.skor}, tingkat ${row.tingkat})</div>
+        ${(row.flags||[]).length ? row.flags.map(f => `<div class="flag-item"><b>${esc(f)}</b> — ${esc(SKRINING_FLAG_LABELS[f]||f)}</div>`).join('') : '<p class="hint">Tidak ada flag.</p>'}
+        ${row.catatanCaseMix ? `<div class="hint" style="margin-top:8px">📝 ${esc(row.catatanCaseMix)}</div>` : ''}
+        ${bolehKelola ? `
+        <div class="section-title" style="margin-top:14px">Tindak Lanjut</div>
+        <select id="skrining_statusTL_${row.id}">
+          <option value="belum_ditinjau" ${row.statusTindakLanjut==='belum_ditinjau'?'selected':''}>Belum Ditinjau</option>
+          <option value="sudah_ditinjau" ${row.statusTindakLanjut==='sudah_ditinjau'?'selected':''}>Sudah Ditinjau (tidak ada masalah)</option>
+          <option value="dikoreksi" ${row.statusTindakLanjut==='dikoreksi'?'selected':''}>Dikoreksi (klaim sudah diperbaiki)</option>
+        </select>
+        <input id="skrining_catatanTL_${row.id}" placeholder="Catatan tindak lanjut (opsional)" value="${esc(row.catatanTindakLanjut||'')}" style="margin-top:6px">
+        <div style="margin-top:8px">
+          <button class="btn sm" onclick="tandaiSkrining('${row.id}')">Simpan Tindak Lanjut</button>
+          <button class="btn sm danger" onclick="hapusSkrining('${row.id}')">Hapus dari Daftar</button>
+        </div>` : ''}
+        <div style="margin-top:16px;text-align:right"><button class="btn ghost" onclick="this.closest('.modal-backdrop').remove()">Tutup</button></div>
+      </div>
+    </div>`;
+}
+function bukaRekamMedisDariSkrining(pasienId, kunjunganId){
+  // Diagnosa & Tindakan (rekam medis) dibuka per kunjungan, bukan per pasien
+  // -- kalau tidak ada kunjungan yang tertaut (misal pasien lama tanpa
+  // kunjungan aktif), arahkan ke Kunjungan Aktif supaya staf bisa cari sendiri.
+  if(kunjunganId){
+    pilihKunjungan(kunjunganId);
+  } else {
+    toast('Pasien ditemukan tapi belum ada kunjungan tertaut — cari manual di menu Kunjungan Aktif');
+    goTo('kunjungan');
+  }
+}
+async function tandaiSkrining(id){
+  const status = val('skrining_statusTL_'+id);
+  const catatan = val('skrining_catatanTL_'+id);
+  const r = await api('klaimSkrining.tandai', {id, statusTindakLanjut: status, catatanTindakLanjut: catatan}, 'POST');
+  if(r.ok){ toast(r.msg||'Tersimpan'); document.querySelectorAll('.modal-backdrop').forEach(m=>m.remove()); await muatSkrining(); }
+  else { toast(r.msg||'Gagal menyimpan'); }
+}
+async function hapusSkrining(id){
+  if(!confirm('Hapus klaim ini dari daftar Verifikasi Klaim?')) return;
+  const r = await api('klaimSkrining.hapus', {id}, 'POST');
+  if(r.ok){ toast('Dihapus'); document.querySelectorAll('.modal-backdrop').forEach(m=>m.remove()); await muatSkrining(); }
+  else { toast(r.msg||'Gagal menghapus'); }
+}
+// Parser CSV sederhana (RFC4180-ish): menangani field berkoma di dalam tanda
+// kutip ganda dan tanda kutip ganda yang di-escape (""). Cukup untuk CSV
+// ekspor dari Supabase/aplikasi lain -- bukan pengganti library CSV lengkap.
+function parseCsvSederhana(teks){
+  const baris = [];
+  let field = '', row = [], dalamKutip = false;
+  for(let i=0; i<teks.length; i++){
+    const c = teks[i], next = teks[i+1];
+    if(dalamKutip){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ dalamKutip = false; }
+      else { field += c; }
+    } else {
+      if(c === '"'){ dalamKutip = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && next === '\n') i++;
+        row.push(field); field = '';
+        if(row.length > 1 || row[0] !== ''){ baris.push(row); }
+        row = [];
+      } else { field += c; }
+    }
+  }
+  if(field !== '' || row.length){ row.push(field); baris.push(row); }
+  if(!baris.length) return [];
+  const header = baris[0].map(h => h.trim().toLowerCase());
+  return baris.slice(1).map(cols => {
+    const obj = {};
+    header.forEach((h,i) => obj[h] = (cols[i]!==undefined ? cols[i].trim() : ''));
+    return obj;
+  });
+}
+// Fleksibel terhadap dua kemungkinan nama kolom CSV: hasil "Ekspor CSV"
+// bawaan aplikasi INA-CBG v2 (no_rm, nama_pasien, dpjp, skor, tingkat, flags)
+// ATAU hasil query SQL Editor yang lebih lengkap (+ dx_utama, status_klaim,
+// score, level, catatan_case_mix). Kolom flags dipisah oleh "; ".
+function baseCsvSkriningKeRows(dataCsv){
+  return dataCsv.map(row => ({
+    noRm: row['no_rm'] || row['norm'] || '',
+    namaPasien: row['nama_pasien'] || row['nama'] || '',
+    dpjp: row['dpjp'] || '',
+    dxUtama: row['dx_utama'] || row['dxutama'] || row['diagnosa'] || '',
+    statusKlaim: row['status_klaim'] || '',
+    skor: Number(row['skor'] || row['score'] || 0) || 0,
+    tingkat: row['tingkat'] || row['level'] || '',
+    flags: (row['flags']||'').split(';').map(s=>s.trim()).filter(Boolean),
+    catatanCaseMix: row['catatan_case_mix'] || '',
+  }));
+}
+async function imporCsvSkrining(){
+  const fileInput = document.getElementById('skriningCsvFile');
+  const hasilEl = document.getElementById('skriningImporHasil');
+  if(!fileInput.files.length){ toast('Pilih file CSV dulu'); return; }
+  hasilEl.textContent = 'Membaca & mengimpor...';
+  const teks = await fileInput.files[0].text();
+  const dataCsv = parseCsvSederhana(teks);
+  if(!dataCsv.length){ hasilEl.textContent = 'File CSV kosong atau tidak terbaca.'; return; }
+  const rows = baseCsvSkriningKeRows(dataCsv);
+  const r = await api('klaimSkrining.import', {rows}, 'POST');
+  if(r.ok){
+    hasilEl.textContent = `✅ ${r.jumlahBaru} baris baru, ${r.jumlahDiperbarui} diperbarui, ${r.jumlahDilewati} dilewati (sudah ditinjau sebelumnya, atau data tidak lengkap).`;
+    toast('Impor selesai');
+    fileInput.value = '';
+    await muatSkrining();
+  } else {
+    hasilEl.textContent = '❌ Gagal: ' + (r.msg||'tidak diketahui');
+  }
 }
 
 /* ================= PENGATURAN & LOG NOTIFIKASI WHATSAPP (admin) ================= */
