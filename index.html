@@ -3503,6 +3503,15 @@ async function renderPenunjangTab(tab){
           <div id="tplPoliList" style="margin-top:10px"><div class="hint">Pilih Poli di atas untuk lihat/kelola templatenya.</div></div>
         </div>
       </div>
+      <div class="section-title" style="margin-top:20px">🔮 Prediksi Kebutuhan Stok Farmasi</div>
+      <p class="hint">Dihitung otomatis dari rata-rata pemakaian riil per obat (bukan cuma ambang stok minimal statis) — memperkirakan kapan tiap obat akan habis, dan menandai kalau obat justru berisiko kedaluwarsa LEBIH DULU sebelum habis terpakai (jadi bukan sekadar "kurang stok", tapi juga "kelebihan stok yang akan terbuang"). ⚠️ Ini perkiraan berbasis tren pemakaian historis, BUKAN jaminan — tetap gunakan penilaian farmasi untuk obat musiman/kondisi luar biasa (KLB, dll).</p>
+      <div class="row">
+        <div><label>Lihat pemakaian (hari terakhir)</label><input id="stokPrediksiLookback" type="number" value="30"></div>
+        <div><label>Ambang "segera pesan" (proyeksi ≤ N hari)</label><input id="stokPrediksiAmbang" type="number" value="14"></div>
+        <div style="align-self:flex-end"><button class="btn sm" onclick="muatPrediksiStokFarmasi()">Hitung Ulang</button></div>
+      </div>
+      <div id="farmasiPrediksiKpi" class="grid cols3" style="margin-top:10px"></div>
+      <div id="farmasiPrediksiStok" style="margin-top:10px">Memuat...</div>
       ` : ""}
       <div class="section-title" style="margin-top:20px">Daftar Resep</div>
       <div id="pjList"></div>`;
@@ -3517,6 +3526,7 @@ async function renderPenunjangTab(tab){
     const resepRows = await api('farmasi.listResep', {}, 'POST');
     document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
     if(bolehKelola) await muatObatKadaluarsa();
+    if(bolehKelola) await muatPrediksiStokFarmasi();
   } else if (tab === 'gizi') {
     const bolehProsesGizi = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('gizi');
     body.innerHTML = `
@@ -4227,6 +4237,41 @@ async function muatObatKadaluarsa(){
     ${rows.map(x=>`<tr><td>${x.kodeObat}</td><td>${x.namaObat}</td><td>${x.noBatch}</td><td>${x.jumlahSisa} ${x.satuan||''}</td>
       <td>${new Date(x.tanggalKadaluarsa).toLocaleDateString('id-ID')}</td>
       <td><span class="badge ${x.status==='Kadaluarsa'?'danger':'warn'}">${x.status}</span></td></tr>`).join("")}
+  </table>`;
+}
+async function muatPrediksiStokFarmasi(){
+  const box = document.getElementById('farmasiPrediksiStok');
+  const kpiBox = document.getElementById('farmasiPrediksiKpi');
+  if(!box) return;
+  box.innerHTML = 'Memuat...';
+  const lookbackHari = Number(val('stokPrediksiLookback')) || 30;
+  const ambangHari = Number(val('stokPrediksiAmbang')) || 14;
+  const r = await api('farmasi.prediksiStok', {lookbackHari, ambangHari}, 'POST');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat prediksi stok'}</div>`; return; }
+  const rows = r.data || [];
+  if(kpiBox){
+    kpiBox.innerHTML = `
+      <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.ringkasan.segeraPesan}</b><span>Perlu Segera Dipesan</span></div>
+      <div class="card stat" style="border-color:var(--orange,#c77700)"><b style="color:var(--orange,#c77700)">${r.ringkasan.risikoKedaluwarsa}</b><span>Risiko Kedaluwarsa Sebelum Habis</span></div>
+      <div class="card stat"><b>${r.ringkasan.tanpaDataPemakaian}</b><span>Belum Ada Data Pemakaian (${lookbackHari} hari)</span></div>`;
+  }
+  if(!rows.length){ box.innerHTML = `<div class="empty">Belum ada obat aktif untuk diprediksi.</div>`; return; }
+  box.innerHTML = `<table>
+    <tr><th>Kode</th><th>Nama Obat</th><th>Stok Saat Ini</th><th>Stok Minimal</th><th>Pemakaian/Hari</th><th>Proyeksi Habis</th><th>Kadaluarsa Terdekat</th><th>Catatan</th></tr>
+    ${rows.map(x=>{
+      const catatan = [];
+      if(x.segeraPesan) catatan.push('<span class="badge danger">⚠️ Segera Pesan</span>');
+      if(x.risikoKedaluwarsaSebelumHabis) catatan.push('<span class="badge warn">⏰ Berisiko Kedaluwarsa Sebelum Habis</span>');
+      if(x.tidakAdaDataPemakaian) catatan.push('<span class="badge muted">Belum Ada Data Pemakaian</span>');
+      return `<tr${x.segeraPesan?' style="background:rgba(220,53,69,0.06)"':''}>
+        <td>${esc(x.kode)}</td><td>${esc(x.namaObat)}</td>
+        <td>${x.stokSaatIni} ${esc(x.satuan||'')}</td><td>${x.stokMinimal}</td>
+        <td>${x.rataRataPemakaianHarian}</td>
+        <td>${x.proyeksiHariHabis!=null ? `${x.proyeksiHariHabis} hari lagi (${new Date(x.proyeksiTanggalHabis).toLocaleDateString('id-ID')})` : '-'}</td>
+        <td>${x.kedaluwarsaTerdekat ? new Date(x.kedaluwarsaTerdekat).toLocaleDateString('id-ID') : '-'}</td>
+        <td>${catatan.join(' ') || '<span class="hint">Aman</span>'}</td>
+      </tr>`;
+    }).join("")}
   </table>`;
 }
 // ===== Keranjang Resep (multi-item) & Obat Favorit (template per dokter/poli) =====
@@ -5848,6 +5893,12 @@ async function pageVerifikasiKlaim(el){
     <div class="grid cols4" id="skriningKpi"></div>
     ${bolehKelola ? `
     <div class="card" style="margin:12px 0">
+      <div class="section-title">🤖 Validasi Klaim Otomatis (dihitung langsung dari data SIMRS)</div>
+      <p class="hint">Sejak fitur ini aktif, setiap kali Prediksi INA-CBG dijalankan (termasuk otomatis saat pasien diproses pulang), klaim langsung diskrining otomatis oleh SIMRS sendiri — kelengkapan berkas, indikasi upcoding, dan rekomendasi kepatuhan Aturan BA — tanpa perlu impor CSV dari aplikasi lain. Baris dengan badge "Otomatis SIMRS" di bawah adalah hasil perhitungan ini. Tombol di bawah menghitung ulang SEMUA klaim yang pernah diprediksi (berguna kalau ada aturan/data yang baru diperbarui) — baris yang sudah ditandai staf "Sudah Ditinjau"/"Dikoreksi" tetap TIDAK akan ditimpa.</p>
+      <button class="btn sm" onclick="jalankanValidasiUlangSemua()">🔁 Jalankan Ulang Validasi Semua</button>
+      <div id="skriningValidasiUlangHasil" class="hint" style="margin-top:6px"></div>
+    </div>
+    <div class="card" style="margin:12px 0">
       <div class="section-title">📥 Impor dari CSV (aplikasi INA-CBG v2)</div>
       <p class="hint">Ekspor CSV dari aplikasi INA-CBG v2 (tombol Ekspor CSV di tab Skrining, atau lewat SQL Editor Supabase proyek itu), lalu unggah di sini. Klaim yang sudah ditandai "Sudah Ditinjau"/"Dikoreksi" TIDAK akan ditimpa kalau file yang sama diimpor ulang.</p>
       <input type="file" id="skriningCsvFile" accept=".csv,text/csv">
@@ -5880,35 +5931,65 @@ async function muatSkrining(){
     <div class="card stat"><b>${r.rendah}</b><span>Risiko Rendah</span></div>
   `;
   if(!r.data.length){ bodyEl.innerHTML = `<div class="empty">Belum ada klaim yang diskrining, atau tidak ada yang cocok filter.</div>`; return; }
-  bodyEl.innerHTML = `<table><tr><th>No. RM</th><th>Pasien</th><th>DPJP</th><th>Dx Utama</th><th>Skor</th><th>Tingkat</th><th>Jml. Flag</th><th>Status</th><th></th></tr>
+  bodyEl.innerHTML = `<table><tr><th>No. RM</th><th>Pasien</th><th>DPJP</th><th>Dx Utama</th><th>Sumber</th><th>Skor</th><th>Tingkat</th><th>Jml. Flag</th><th>Status</th><th></th></tr>
     ${r.data.map(x => {
       const statusBadge = x.statusTindakLanjut==='dikoreksi' ? '<span class="badge ok">Dikoreksi</span>'
         : x.statusTindakLanjut==='sudah_ditinjau' ? '<span class="badge muted">Sudah Ditinjau</span>'
         : '<span class="badge warn">Belum Ditinjau</span>';
+      const sumberBadge = x.sumber === 'otomatis_simrs' ? '<span class="badge ok">🤖 Otomatis SIMRS</span>' : '<span class="badge muted">Impor CSV</span>';
       return `<tr>
         <td>${esc(x.noRm)}</td><td>${esc(x.namaPasien||'-')}</td><td>${esc(x.dpjp||'-')}</td><td>${esc(x.dxUtama||'-')}</td>
+        <td>${sumberBadge}</td>
         <td>${x.skor}</td><td>${skriningTingkatBadge(x.tingkat)}</td><td>${(x.flags||[]).length}</td><td>${statusBadge}</td>
         <td><button class="btn sm ghost" onclick="bukaDetailSkrining('${x.id}')">Detail</button></td>
       </tr>`;
     }).join("")}
   </table>`;
 }
+async function jalankanValidasiUlangSemua(){
+  if(!confirm('Hitung ulang validasi otomatis untuk semua klaim yang pernah diprediksi? Baris yang sudah ditandai "Sudah Ditinjau"/"Dikoreksi" tidak akan ditimpa.')) return;
+  const hasilEl = document.getElementById('skriningValidasiUlangHasil');
+  if(hasilEl) hasilEl.textContent = 'Memproses...';
+  const r = await api('klaimSkrining.validasiUlangSemua', {}, 'POST');
+  if(hasilEl) hasilEl.textContent = r.ok ? (r.msg||'Selesai') : (r.msg||'Gagal');
+  if(r.ok) await muatSkrining();
+}
+async function validasiUlangSatuKlaim(kunjunganId){
+  const r = await api('klaimSkrining.validasiUlang', {kunjunganId}, 'POST');
+  if(r.ok){ toast('Validasi ulang selesai'); document.querySelectorAll('.modal-backdrop').forEach(m=>m.remove()); await muatSkrining(); }
+  else { toast(r.msg||'Gagal menghitung ulang'); }
+}
 function bukaDetailSkrining(id){
   const row = (window._skriningData||[]).find(r => r.id === id);
   const panel = document.getElementById('skriningDetailPanel');
   if(!row || !panel) return;
   const bolehKelola = state.user.role === 'admin' || state.user.role === 'verifikator';
+  const sumberBadge = row.sumber === 'otomatis_simrs' ? '<span class="badge ok">🤖 Otomatis SIMRS</span>' : '<span class="badge muted">Impor CSV</span>';
   panel.innerHTML = `
     <div class="modal-backdrop" onclick="if(event.target===this) this.remove()">
       <div class="modal">
         <h2 style="margin-top:0">${esc(row.namaPasien||row.noRm)}</h2>
-        <p class="hint">No. RM: ${esc(row.noRm)} · ${esc(row.dxUtama||'-')} · DPJP: ${esc(row.dpjp||'-')} · Status Klaim: ${esc(row.statusKlaim||'-')}</p>
+        <p class="hint">No. RM: ${esc(row.noRm)} · ${esc(row.dxUtama||'-')} · DPJP: ${esc(row.dpjp||'-')} · Status Klaim: ${esc(row.statusKlaim||'-')} · Sumber: ${sumberBadge}</p>
         ${row.pasienId
           ? `<button class="btn sm ghost" onclick="this.closest('.modal-backdrop').remove(); bukaRekamMedisDariSkrining('${row.pasienId}','${row.kunjunganId||''}')">📂 Buka Rekam Medis Pasien</button>`
           : `<p class="hint" style="color:var(--red)">⚠️ Pasien tidak ditemukan di SIMRS lewat No. RM ini — cek kembali kecocokan No. RM secara manual.</p>`}
+        ${(bolehKelola && row.kunjunganId) ? `<button class="btn sm ghost" onclick="validasiUlangSatuKlaim('${row.kunjunganId}')">🔁 Validasi Ulang</button>` : ''}
+        ${row.kelengkapanBerkas && row.kelengkapanBerkas.length ? `
+        <div class="section-title" style="margin-top:14px">📋 Kelengkapan Berkas</div>
+        ${row.kelengkapanBerkas.map(b => `<div class="flag-item">${b.terpenuhi ? '✅' : '❌'} ${esc(b.label)}</div>`).join('')}
+        ` : ''}
         <div class="section-title" style="margin-top:14px">Flag Terdeteksi (skor total: ${row.skor}, tingkat ${row.tingkat})</div>
         ${(row.flags||[]).length ? row.flags.map(f => `<div class="flag-item"><b>${esc(f)}</b> — ${esc(SKRINING_FLAG_LABELS[f]||f)}</div>`).join('') : '<p class="hint">Tidak ada flag.</p>'}
         ${row.catatanCaseMix ? `<div class="hint" style="margin-top:8px">📝 ${esc(row.catatanCaseMix)}</div>` : ''}
+        ${row.rekomendasi && row.rekomendasi.length ? `
+        <div class="section-title" style="margin-top:14px">💡 Rekomendasi Kepatuhan (Aturan BA / kelengkapan klaim)</div>
+        ${row.rekomendasi.map(rk => `<div class="flag-item">
+          <b>${esc(rk.judul||'')}</b>
+          ${rk.keterangan ? `<div class="hint" style="margin-top:2px">${esc(rk.keterangan)}</div>` : ''}
+          ${rk.perhatianKhusus ? `<div class="hint" style="margin-top:2px;color:var(--red)">⚠️ ${esc(rk.perhatianKhusus)}</div>` : ''}
+          ${rk.referensi ? `<div class="hint" style="margin-top:2px">Ref: ${esc(rk.referensi)}</div>` : ''}
+        </div>`).join('')}
+        ` : ''}
         ${bolehKelola ? `
         <div class="section-title" style="margin-top:14px">Tindak Lanjut</div>
         <select id="skrining_statusTL_${row.id}">
