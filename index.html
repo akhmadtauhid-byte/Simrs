@@ -262,7 +262,10 @@ const NAV = [
   {id:"rekap", label:"Rekap Klaim", step:null, group:"Klaim & Kepatuhan BPJS"},
   {id:"aturanba", label:"📋 Aturan BA 2024", step:null, group:"Klaim & Kepatuhan BPJS"},
   {id:"verifikasiklaim", label:"🔍 Verifikasi Klaim", step:null, group:"Klaim & Kepatuhan BPJS"},
-{id:"penunjang", label:"🧪 Unit Penunjang", step:null, group:"Fasilitas & Penunjang"},
+  {id:"lab", label:"🧫 Laboratorium", step:null, group:"Penunjang Medis"},
+  {id:"radiologi", label:"🩻 Radiologi", step:null, group:"Penunjang Medis"},
+  {id:"farmasi", label:"💊 Farmasi", step:null, group:"Penunjang Medis"},
+{id:"penunjang", label:"🗂️ Unit Penunjang Lainnya", step:null, group:"Fasilitas & Penunjang"},
 {id:"manajemenkamar", label:"🛏️ Manajemen Kamar", step:null, group:"Fasilitas & Penunjang"},
 {id:"tarif", label:"💰 Master Tarif", step:null, group:"Fasilitas & Penunjang"},
 {id:"kamaroperasi", label:"🔪 Kamar Operasi", step:null, group:"Fasilitas & Penunjang"},
@@ -290,17 +293,21 @@ const ROLE_ACCESS = {
   // jadi tidak ada data bocor — tapi menu yang tampil salah & membingungkan.
   rekam_medis: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","suratketerangan","kamaroperasi","verifikasiklaim","clinicalpathway"],
   perawat: ["dashboard","kunjungan","asesmenawal","rekammedis","cppt","aturanba","igd","clinicalpathway"],
-  kasir: ["dashboard","kunjungan","billing","penunjang","tarif","pengadaanobat","clinicalpathway"],
-verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","penunjang","tarif","suratketerangan","verifikasiklaim","clinicalpathway"],
+  kasir: ["dashboard","kunjungan","billing","lab","radiologi","farmasi","penunjang","tarif","pengadaanobat","clinicalpathway"],
+verifikator: ["dashboard","kunjungan","inacbg","pulang","rekap","aturanba","lab","radiologi","farmasi","penunjang","tarif","suratketerangan","verifikasiklaim","clinicalpathway"],
 };
 // Hak akses granular (menambah, bukan mengganti, ROLE_ACCESS di atas): admin
 // bisa mencentang modul satu per satu per staf lewat halaman "Kelola Hak
-// Akses". Satu modul bisa membuka lebih dari satu menu (mis. modul lab/rad/
-// farmasi/gizi/cssd/linen semuanya membuka menu "penunjang" yang sama).
+// Akses". Satu modul bisa membuka lebih dari satu menu. CATATAN: Lab,
+// Radiologi & Farmasi dulu semuanya bermuara ke satu menu generik "Unit
+// Penunjang" -- sekarang masing-masing punya menu tersendiri di sidebar
+// (id "lab"/"radiologi"/"farmasi") supaya navigasinya lebih spesifik. Menu
+// "penunjang" (Unit Penunjang Lainnya) sekarang hanya menampung sub-unit
+// yang lebih jarang dipakai langsung staf (Gizi/CSSD/Linen/Jenazah/BHP).
 const MODUL_KE_NAV = {
   pendaftaran:["pendaftaran"], kunjungan:["kunjungan"], igd:["igd","cppt","asesmenawal","suratketerangan"], rekammedis:["rekammedis","cppt","asesmenawal","suratketerangan"],
   billing:["billing"], inacbg:["inacbg"], pulang:["pulang","suratketerangan"], rekap:["rekap"], aturanba:["aturanba"],
-  lab:["penunjang"], rad:["penunjang"], farmasi:["penunjang","cppt","pengadaanobat"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
+  lab:["lab"], rad:["radiologi"], farmasi:["farmasi","cppt","pengadaanobat"], gizi:["penunjang","cppt"], cssd:["penunjang"], linen:["penunjang"], bhp:["penunjang"], jenazah:["penunjang"],
   tarif:["tarif"], mutu:["dashboardmutu","laporanrl"], ranap:["manajemenkamar"], ok:["kamaroperasi"], jadwaljaga:["jadwaljaga"],
   ppi:["ppi"], alatmedis:["alatmedis"], pelaporan:["laporanrl"], verifikasiklaim:["verifikasiklaim"], clinicalpathway:["clinicalpathway"]
 };
@@ -315,14 +322,14 @@ const DAFTAR_MODUL = [
   {id:"pulang", label:"Proses Pulang"},
   {id:"rekap", label:"Rekap Klaim"},
   {id:"aturanba", label:"Aturan BA 2024"},
-  {id:"lab", label:"Unit Penunjang — Lab"},
-  {id:"rad", label:"Unit Penunjang — Radiologi"},
-  {id:"farmasi", label:"Unit Penunjang — Farmasi"},
-  {id:"gizi", label:"Unit Penunjang — Gizi"},
-  {id:"cssd", label:"Unit Penunjang — CSSD"},
-  {id:"linen", label:"Unit Penunjang — Linen"},
-  {id:"jenazah", label:"Unit Penunjang — Pemulasaraan Jenazah"},
-  {id:"bhp", label:"Unit Penunjang — BHP/Alkes (stok bahan habis pakai)"},
+  {id:"lab", label:"Laboratorium"},
+  {id:"rad", label:"Radiologi"},
+  {id:"farmasi", label:"Farmasi"},
+  {id:"gizi", label:"Unit Penunjang Lainnya — Gizi"},
+  {id:"cssd", label:"Unit Penunjang Lainnya — CSSD"},
+  {id:"linen", label:"Unit Penunjang Lainnya — Linen"},
+  {id:"jenazah", label:"Unit Penunjang Lainnya — Pemulasaraan Jenazah"},
+  {id:"bhp", label:"Unit Penunjang Lainnya — BHP/Alkes (stok bahan habis pakai)"},
   {id:"ranap", label:"Manajemen Tempat Tidur/Kamar"},
   {id:"tarif", label:"Master Tarif"},
   {id:"mutu", label:"Mutu & Keselamatan Pasien (baca semua laporan IKP + Dashboard Mutu)"},
@@ -1142,7 +1149,8 @@ function render(){
     ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
     suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
     ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim,
-    pengadaanobat: pagePengadaanObat, clinicalpathway: pageClinicalPathway
+    pengadaanobat: pagePengadaanObat, clinicalpathway: pageClinicalPathway,
+    lab: pageLabUtama, radiologi: pageRadiologiUtama, farmasi: pageFarmasiUtama
   };
   m.innerHTML = `${DEMO_MODE ? `<div class="config-note">⚠️ Mode demo aktif — data hanya tersimpan di browser ini (belum tersambung ke Google Sheets). Isi <code>API_URL</code> di bagian atas file dengan Web App URL hasil deploy Code.gs untuk data permanen multi-user.</div>` : ""}`;
   const holder = document.createElement("div"); m.appendChild(holder);
@@ -2121,7 +2129,7 @@ async function pageRekamMedis(el){
     ${(d.radHasil||[]).map(x=>`<div style="margin-bottom:8px"><b>🩻 ${x.jenisPemeriksaan}</b> <span class="badge ${x.status==='Selesai'?'ok':'muted'}">${x.status}</span>
       ${x.hasil ? `<div style="margin-top:4px">${x.hasil}</div><div class="hint">Diisi oleh ${x.namaPengisiHasil||"-"} (${x.profesiPengisiHasil||"-"}), ${new Date(x.waktuHasil).toLocaleString('id-ID')}</div>` : `<div class="hint">Belum ada hasil</div>`}
     </div>`).join("")}
-    <p class="hint">Mengisi hasil dilakukan lewat menu "🧪 Unit Penunjang" oleh petugas Lab/Radiologi.</p>
+    <p class="hint">Mengisi hasil dilakukan lewat menu "🧫 Laboratorium" / "🩻 Radiologi" di sidebar oleh petugas terkait.</p>
   </div>` : ""}
   <div class="section-title">Diagnosa Tercatat</div>
   <div class="card">${d.diagnosa.length ? `<table><tr><th>Jenis</th><th>Kode</th><th>Deskripsi</th><th></th></tr>
@@ -3487,15 +3495,21 @@ function onTarifUnitChange(selectId, namaId, hargaId){
   if(namaEl){ namaEl.readOnly = !manual; namaEl.style.background = manual ? "" : "#f5f5f5"; if(!manual) namaEl.value = opt.dataset.nama || ""; }
   if(hargaEl){ hargaEl.readOnly = !manual; hargaEl.style.background = manual ? "" : "#f5f5f5"; if(!manual) hargaEl.value = opt.dataset.harga || 0; }
 }
+// Lab, Radiologi & Farmasi sekarang punya menu TERSENDIRI di sidebar (id
+// "lab"/"radiologi"/"farmasi", lihat pageLabUtama/pageRadiologiUtama/
+// pageFarmasiUtama di bawah) -- supaya tidak menumpuk jadi satu menu generik
+// "Unit Penunjang" yang menampung segalanya. Menu "Unit Penunjang Lainnya"
+// ini sekarang hanya berisi sub-unit yang lebih jarang dibuka langsung staf.
+const PENUNJANG_LAINNYA_TABS = ["gizi","cssd","linen","jenazah","bhp"];
 function penunjangTabsAllowed(){
-  const semua = Object.keys(PENUNJANG_TAB_LABEL);
+  const semua = PENUNJANG_LAINNYA_TABS;
   if(!state.user) return [];
   if(["admin","kasir","verifikator"].includes(state.user.role)) return semua;
   return semua.filter(m => (state.user.modul||[]).includes(m));
 }
 async function pagePenunjang(el){
   const tabs = penunjangTabsAllowed();
-  el.innerHTML = `<h1>Unit Penunjang</h1><p class="sub">Lab, Radiologi, Farmasi, Gizi, CSSD, Linen</p>
+  el.innerHTML = `<h1>🗂️ Unit Penunjang Lainnya</h1><p class="sub">Gizi, CSSD, Linen, Pemulasaraan Jenazah, BHP/Alkes — untuk Laboratorium, Radiologi & Farmasi lihat menu tersendiri di sidebar.</p>
     <div class="card">
       <div id="penunjangTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
         ${tabs.map(t=>`<button class="btn" onclick="renderPenunjangTab('${t}')">${PENUNJANG_TAB_LABEL[t]}</button>`).join("")}
@@ -3504,6 +3518,20 @@ async function pagePenunjang(el){
     </div>`;
   if(tabs.length) renderPenunjangTab(tabs[0]);
 }
+// Halaman tersendiri untuk satu unit penunjang spesifik (Lab/Radiologi/
+// Farmasi) -- memakai ulang PERSIS renderPenunjangTab(tab) yang sama dengan
+// yang dipakai "Unit Penunjang Lainnya", cuma dibungkus tanpa saklar tab
+// karena menunya sudah langsung spesifik lewat sidebar.
+async function pagePenunjangSatuUnit(el, tab){
+  const label = PENUNJANG_TAB_LABEL[tab];
+  const diizinkan = !!state.user && (["admin","kasir","verifikator"].includes(state.user.role) || (state.user.modul||[]).includes(tab));
+  el.innerHTML = `<h1>${label==='Lab'?'🧫':(label==='Radiologi'?'🩻':'💊')} ${label}</h1><p class="sub">Modul ${label} RSU Allam Medica</p>
+    <div class="card"><div id="penunjangBody">${diizinkan ? "" : `<div class="empty">Modul ini tidak diizinkan untuk akun Anda. Hubungi admin.</div>`}</div></div>`;
+  if(diizinkan) await renderPenunjangTab(tab);
+}
+async function pageLabUtama(el){ return pagePenunjangSatuUnit(el, "lab"); }
+async function pageRadiologiUtama(el){ return pagePenunjangSatuUnit(el, "rad"); }
+async function pageFarmasiUtama(el){ return pagePenunjangSatuUnit(el, "farmasi"); }
 
 async function renderPenunjangTab(tab){
   const body = document.getElementById('penunjangBody');
@@ -4867,7 +4895,7 @@ function kotakCariTarifHtml(placeholder){
   return `<div style="margin-bottom:10px"><input id="tf_cari" oninput="renderFilteredTarifList()" placeholder="${placeholder || 'Cari...'}"></div>`;
 }
 async function pageTarif(el){
-  el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, &amp; Tarif Layanan Penunjang per unit (Lab/Radiologi/Gizi/CSSD/Linen/Jenazah). Harga obat Farmasi dikelola di menu Unit Penunjang &gt; tab Farmasi.</p>
+  el.innerHTML = `<h1>Master Tarif</h1><p class="sub">Rawat Inap, Rawat Jalan, &amp; Tarif Layanan Penunjang per unit (Lab/Radiologi/Gizi/CSSD/Linen/Jenazah). Harga obat Farmasi dikelola di menu Farmasi tersendiri di sidebar.</p>
     <div class="card">
       <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn" onclick="renderTarifTab('inap')">Rawat Inap</button>
@@ -4883,8 +4911,7 @@ async function pageTarif(el){
   renderTarifTab('inap');
 }
 function bukaFarmasiDariTarif(){
-  goTo('penunjang');
-  setTimeout(()=>renderPenunjangTab('farmasi'), 50);
+  goTo('farmasi');
 }
 
 async function renderTarifTab(tab){
@@ -6358,7 +6385,7 @@ async function muatPengaturanMargin(){
       <div><label>Persentase Margin Default (%)</label><input id="marginDefault" type="number" step="0.1" value="${r.persenMarginDefault||0}" ${bolehKelola?'':'disabled'}></div>
       ${bolehKelola ? `<div style="align-self:flex-end"><button class="btn sm" onclick="submitSimpanMargin()">Simpan</button></div>` : ''}
     </div>
-    <p class="hint">Persentase margin khusus per obat bisa diisi lewat "Edit" di tabel Master Obat (menu Unit Penunjang → Farmasi).</p>`;
+    <p class="hint">Persentase margin khusus per obat bisa diisi lewat "Edit" di tabel Master Obat (menu 💊 Farmasi di sidebar).</p>`;
 }
 async function submitSimpanMargin(){
   const persenMarginDefault = Number(val('marginDefault'));
