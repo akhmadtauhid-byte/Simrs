@@ -1445,16 +1445,18 @@ function renderRiwayatPasienCard(r, opt){
     <div class="hint">Total kunjungan sebelumnya: <b>${r.totalKunjungan}</b></div>
     ${alergiUtama ? `<div style="margin-top:4px">🚫 Alergi (data Pendaftaran): <b>${alergiUtama}</b></div>` : `<div class="hint" style="margin-top:4px">Tidak ada catatan alergi di data Pendaftaran.</div>`}
     ${r.alergiBerbeda ? `<div class="flag-item warn" style="margin-top:6px">⚠️ Catatan alergi terbaru dari Asesmen Awal ("${r.alergiTerbaruDariAsesmen}") BERBEDA dari data Pendaftaran di atas — mohon dikonfirmasi ulang ke pasien & disamakan.</div>` : ""}
-    ${kunjungan.length ? `<table style="margin-top:8px"><tr><th>Tanggal</th><th>Jenis</th><th>DPJP</th><th>Diagnosa Utama</th><th>Status</th><th>Obat</th></tr>
+    ${kunjungan.length ? `<table style="margin-top:8px"><tr><th>Tanggal</th><th>Jenis</th><th>DPJP</th><th>Diagnosa Utama</th><th>Status</th><th>Obat</th><th></th></tr>
       ${kunjungan.map(k=>`<tr>
         <td>${new Date(k.tanggal).toLocaleDateString('id-ID')}</td>
         <td>${k.jenisKunjungan}</td><td>${k.dpjp||"-"}</td>
         <td>${k.diagnosaUtama||"-"}</td>
         <td><span class="badge ${k.status==='Selesai'?'ok':'muted'}">${k.status}</span></td>
         <td>${(k.obatDiresepkan||[]).length ? k.obatDiresepkan.map(o=>o.namaObat).join(", ") : "-"}</td>
+        <td>${k.status==='Selesai' ? `<button class="btn sm ghost" onclick="cetakResumeDariRiwayat('${k.noKunjungan}','${r.pasien.id}')">🖨️ Resume</button>` : '<span class="hint">-</span>'}</td>
       </tr>`).join("")}
     </table>` : `<div class="hint" style="margin-top:6px">Belum ada riwayat kunjungan sebelumnya.</div>`}
     ${opt.ringkas && r.totalKunjungan > maxItem ? `<div class="hint" style="margin-top:6px">Menampilkan ${maxItem} kunjungan terbaru dari total ${r.totalKunjungan}.</div>` : ""}
+    <div id="areaCetakRiwayat_${r.pasien.id}" style="margin-top:10px"></div>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sm ghost" onclick='toggleEditPasien(${JSON.stringify(r.pasien)})'>✏️ Edit Data Pasien</button>
       <button class="btn sm danger" onclick="hapusPasienData('${r.pasien.id}','${(r.pasien.nama||'').replace(/'/g,"\\'")}')">🗑️ Hapus Pasien</button>
@@ -2954,14 +2956,25 @@ async function tampilkanCetakRujukan(kunjunganId){
     <button class="btn" style="margin-top:12px" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>`;
 }
 
-async function tampilkanCetak(kunjunganId){
+// Cetak ulang Resume Medis untuk kunjungan LAMA yang sudah selesai/pulang,
+// dipanggil dari kartu Riwayat Pasien (Pendaftaran maupun Rekam Medis) --
+// tidak perlu mengulang proses Pasien Pulang lagi. Pakai target elemen
+// tersendiri per pasien (areaCetakRiwayat_<id>) supaya tidak bentrok kalau
+// ada beberapa kartu riwayat di halaman yang sama.
+async function cetakResumeDariRiwayat(noKunjungan, pasienId){
+  await tampilkanCetak(noKunjungan, 'areaCetakRiwayat_' + pasienId);
+  const el = document.getElementById('areaCetakRiwayat_' + pasienId);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+}
+async function tampilkanCetak(kunjunganId, targetId){
+  targetId = targetId || "areaCetak";
   const d = await api("getKunjunganDetail", {id:kunjunganId}, "GET");
   if(!d.ok){ toast("Gagal memuat data"); return; }
   const p = d.pasien||{};
   const totalBilling = d.billing.reduce((s,r)=>s+Number(r.Total||0),0);
   const tglMasuk = d.rawatInap ? new Date(d.rawatInap.TglMasuk||d.rawatInap.tglMasuk).toLocaleDateString('id-ID') : "-";
   const tglKeluar = d.rawatInap ? new Date(d.rawatInap.TglKeluar||d.rawatInap.tglKeluar||Date.now()).toLocaleDateString('id-ID') : new Date().toLocaleDateString('id-ID');
-  document.getElementById("areaCetak").innerHTML = `
+  document.getElementById(targetId).innerHTML = `
     <div class="resep-print">
       <h2>RSU Allam Medica</h2>
       <div class="sub2">Bumiayu, Kabupaten Brebes, Jawa Tengah — Resume Medis & Kuitansi Pasien Pulang</div>
