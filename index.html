@@ -2965,8 +2965,14 @@ async function tampilkanCetakRujukan(kunjunganId){
 // tersendiri per pasien (areaCetakRiwayat_<id>) supaya tidak bentrok kalau
 // ada beberapa kartu riwayat di halaman yang sama.
 async function cetakResumeDariRiwayat(noKunjungan, pasienId){
-  await tampilkanCetak(noKunjungan, 'areaCetakRiwayat_' + pasienId);
-  const el = document.getElementById('areaCetakRiwayat_' + pasienId);
+  await tampilkanCetakDanScroll(noKunjungan, 'areaCetakRiwayat_' + pasienId);
+}
+// Sama seperti tampilkanCetak, tapi langsung scroll ke area hasilnya --
+// dipakai dari kartu Riwayat Pasien maupun dari daftar Pasien Pulang supaya
+// staf tidak perlu cari-cari sendiri di mana dokumennya muncul.
+async function tampilkanCetakDanScroll(kunjunganId, targetId){
+  await tampilkanCetak(kunjunganId, targetId);
+  const el = document.getElementById(targetId);
   if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function tampilkanCetak(kunjunganId, targetId){
@@ -3120,6 +3126,7 @@ async function pageRekap(el){
         <button class="btn" onclick="renderRekapTab('diagnosa')">Laporan per Diagnosa</button>
         <button class="btn" onclick="renderRekapTab('kematian')">Rekap Kematian</button>
         <button class="btn" onclick="renderRekapTab('statusklaim')">Rekap Status Klaim</button>
+        <button class="btn" onclick="renderRekapTab('pasienpulang')">📜 Pasien Pulang (Riwayat)</button>
       </div>
       <div id="rekapBody"></div>
     </div>`;
@@ -3179,7 +3186,55 @@ async function renderRekapTab(tab){
     document.getElementById("rsk_dari").value = new Date(now.getTime() - 30*86400000).toISOString().slice(0,10);
     document.getElementById("rsk_sampai").value = now.toISOString().slice(0,10);
     await muatRekapStatusKlaim();
+  } else if (tab === 'pasienpulang') {
+    // Daftar pasien yang SUDAH PULANG (kunjungan berstatus "Selesai") dalam
+    // rentang tanggal pilihan -- supaya bisa ditelusuri lalu dibuka Riwayat
+    // Pasiennya / dicetak ulang Resume Medis-nya, tanpa harus tahu No. RM-nya
+    // dulu (beda dengan pencarian di menu Pendaftaran yang harus tahu RM).
+    body.innerHTML = `
+      <p class="sub">Daftar kunjungan yang sudah diproses pulang pada rentang tanggal ini (dihitung dari tanggal keluar Rawat Inap, atau tanggal diproses pulang untuk Rawat Jalan/IGD). Klik "📜 Riwayat" untuk membuka Riwayat Pasiennya, atau "🖨️ Resume" untuk cetak ulang Resume Medis kunjungan itu.</p>
+      <div class="row">
+        <div><label>Dari Tanggal</label><input id="pp_dari" type="date"></div>
+        <div><label>Sampai Tanggal</label><input id="pp_sampai" type="date"></div>
+      </div>
+      <button class="btn" onclick="muatPasienPulang()">Tampilkan</button>
+      ${kotakCariHtml('pasienPulangBody', 'Cari No. RM/nama/DPJP...')}
+      <div id="pasienPulangBody" style="margin-top:14px">Memuat...</div>
+      <div id="areaCetakPasienPulang" style="margin-top:14px"></div>
+      <div id="areaRiwayatPasienPulang" style="margin-top:14px"></div>`;
+    const now2 = new Date();
+    document.getElementById("pp_dari").value = new Date(now2.getTime() - 30*86400000).toISOString().slice(0,10);
+    document.getElementById("pp_sampai").value = now2.toISOString().slice(0,10);
+    await muatPasienPulang();
   }
+}
+async function muatPasienPulang(){
+  const box = document.getElementById('pasienPulangBody');
+  box.innerHTML = 'Memuat...';
+  const r = await api('pasienPulang.daftar', {dari: val('pp_dari'), sampai: val('pp_sampai')}, 'POST');
+  if(!r.ok){ box.innerHTML = `<div class="empty">${r.msg || 'Gagal memuat'}</div>`; return; }
+  setListSearchState('pasienPulangBody', r.data || [], renderPasienPulangRows, ['noRm','nama','dpjp']);
+}
+function renderPasienPulangRows(rows){
+  if(!rows.length) return `<div class="empty">Tidak ada pasien pulang pada periode ini.</div>`;
+  return `<table><tr><th>Tgl Pulang</th><th>No. RM</th><th>Nama</th><th>Jenis</th><th>DPJP</th><th>Cara Keluar</th><th></th></tr>
+    ${rows.map(x=>`<tr>
+      <td>${new Date(x.tanggalPulang).toLocaleString('id-ID')}</td>
+      <td>${x.noRm}</td><td>${x.nama}</td><td>${x.jenisKunjungan}</td><td>${x.dpjp||'-'}</td><td>${x.caraKeluar||'-'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="lihatRiwayatPasienPulang('${x.noRm}')">📜 Riwayat</button>
+        <button class="btn sm ghost" onclick="tampilkanCetakDanScroll('${x.kunjunganId}','areaCetakPasienPulang')">🖨️ Resume</button>
+      </td>
+    </tr>`).join("")}
+    </table>`;
+}
+async function lihatRiwayatPasienPulang(rm){
+  const box = document.getElementById('areaRiwayatPasienPulang');
+  box.innerHTML = 'Memuat...';
+  const r = await api('getRiwayatPasien', {rm}, 'POST');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat riwayat pasien'}</div>`; return; }
+  box.innerHTML = renderRiwayatPasienCard(r, {ringkas:false});
+  box.scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function muatRekapStatusKlaim(){
   const box = document.getElementById('rekapStatusKlaimList');
