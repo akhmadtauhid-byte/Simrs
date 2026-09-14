@@ -2026,13 +2026,16 @@ async function pageRekamMedis(el){
 }
 async function muatRiwayatPasienRM(rm){
   const box = document.getElementById("areaRiwayatPasienRM");
-  if(!box || !rm) return;
+  if(!box) return;
+  if(!rm){ box.innerHTML = `<div class="section-title" style="margin-top:16px">Riwayat Kunjungan Sebelumnya</div><div class="hint">Data pasien untuk kunjungan ini belum termuat — coba muat ulang halaman.</div>`; return; }
   const r = await api("getRiwayatPasien", {rm}, "POST");
-  if(!r || !r.ok) return;
+  if(!r || !r.ok){ box.innerHTML = `<div class="section-title" style="margin-top:16px">Riwayat Kunjungan Sebelumnya</div><div class="hint">${(r&&r.msg)||"Gagal memuat riwayat pasien."}</div>`; return; }
   // Kunjungan yang sedang dibuka tidak perlu ikut ditampilkan di daftar "riwayat sebelumnya".
   const kunjunganSebelumnya = (r.kunjungan||[]).filter(k => k.noKunjungan !== state.activeKunjunganId);
   const filtered = {...r, kunjungan: kunjunganSebelumnya, totalKunjungan: kunjunganSebelumnya.length};
-  if(!filtered.kunjungan.length && !filtered.alergiBerbeda) return;
+  // SELALU tampilkan bagian ini (bukan disembunyikan total kalau kosong) --
+  // supaya staf tahu fiturnya berjalan & memang belum ada riwayat sebelumnya,
+  // bukan mengira fiturnya tidak muncul/rusak.
   box.innerHTML = `<div class="section-title" style="margin-top:16px">Riwayat Kunjungan Sebelumnya</div>` + renderRiwayatPasienCard(filtered, {ringkas:false});
 }
 async function submitPersetujuanTindakan(){
