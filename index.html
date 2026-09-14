@@ -6672,6 +6672,7 @@ function renderCpDaftarPenerapan(daftar){
     <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <div><b>${esc(d.namaCp)}</b> ${d.sumberTemplate!=='ppk_rs'?'<span class="badge warn">Draf</span>':''}
         <div class="sub">Mulai ${new Date(d.tanggalMulai).toLocaleDateString('id-ID')} · ${d.jumlahSesuai}/${d.jumlahItem} Sesuai, ${d.jumlahVarian} Varian</div>
+        ${d.jumlahTerdeteksiBelumDikonfirmasi > 0 ? `<div class="sub" style="color:#0a6">🔎 ${d.jumlahTerdeteksiBelumDikonfirmasi} item terdeteksi otomatis dari data terapi riil — tinggal dikonfirmasi</div>` : ''}
       </div>
       <div>${d.status==='Aktif'?'<span class="badge ok">Aktif</span>':(d.status==='Selesai'?'<span class="badge ok">Selesai</span>':'<span class="badge danger">Dihentikan</span>')}</div>
     </div>
@@ -6693,12 +6694,19 @@ function renderChecklistCpBox(){
   box.innerHTML = `<div class="card">
     <h3>Checklist: ${esc(h.namaCp)}</h3>
     <p class="sub">Estimasi Biaya Standar CP: Rp${Number(h.estimasiBiayaStandar||0).toLocaleString('id-ID')} · Total Billing Saat Ini: Rp${Number(h.totalBillingSaatIni||0).toLocaleString('id-ID')}</p>
-    <table><tr><th>Hari</th><th>Kategori</th><th>Rencana</th><th>Status</th><th>Catatan Varian</th>${boleh && h.status==='Aktif' ? '<th></th>' : ''}</tr>
-      ${(r.checklist||[]).map(c=>`<tr>
-        <td>${c.hariKe}</td><td>${esc(c.kategori)}</td><td>${esc(c.rencana)}</td>
-        <td>${c.status==='Sesuai'?'<span class="badge ok">Sesuai</span>':(c.status==='Varian'?'<span class="badge warn">Varian</span>':'<span class="badge muted">Belum</span>')}</td>
+    <p class="hint">🔎 = terdeteksi otomatis dari data terapi riil yang sudah diinput di modul lain (lab/radiologi/farmasi/tindakan/gizi/asesmen/CPPT) pada tanggal rencananya — tetap perlu dikonfirmasi staf, tidak tercentang sendiri.</p>
+    <table><tr><th>Hari</th><th>Tgl. Rencana</th><th>Kategori</th><th>Rencana</th><th>Status</th><th>Catatan Varian</th>${boleh && h.status==='Aktif' ? '<th></th>' : ''}</tr>
+      ${(r.checklist||[]).map(c=>`<tr${c.terlambat ? ' style="background:#fff7e6"' : ''}>
+        <td>${c.hariKe}</td>
+        <td>${new Date(c.tanggalRencana).toLocaleDateString('id-ID')}${c.terlambat ? ' <span class="badge warn" title="Tanggal rencana sudah lewat, masih Belum ditandai">⏰</span>' : ''}</td>
+        <td>${esc(c.kategori)}</td>
+        <td>${esc(c.rencana)}
+          ${c.status==='Belum' && c.deteksi && c.deteksi.terdeteksi ? `<div class="hint" style="margin-top:4px;color:${c.deteksi.tingkatKeyakinan==='tinggi'?'#0a6':'#a70'}">🔎 ${c.deteksi.tingkatKeyakinan==='lemah'?'Kemungkinan terdeteksi (dari catatan CPPT)':'Terdeteksi'}: ${esc(c.deteksi.ringkasan||'')}</div>` : ''}
+        </td>
+        <td>${c.status==='Sesuai'?`<span class="badge ok">Sesuai${c.dikonfirmasiDariDeteksi?' (Otomatis)':''}</span>`:(c.status==='Varian'?'<span class="badge warn">Varian</span>':'<span class="badge muted">Belum</span>')}</td>
         <td>${esc(c.catatanVarian||'-')}</td>
         ${boleh && h.status==='Aktif' ? `<td style="white-space:nowrap">
+          ${c.status==='Belum' && c.deteksi && c.deteksi.terdeteksi ? `<button class="btn sm" onclick="submitRealisasiCpDariDeteksi('${c.realisasiId}')">🔎 Konfirmasi Sesuai</button>` : ''}
           <button class="btn sm ghost" onclick="submitRealisasiCp('${c.realisasiId}','Sesuai')">✔ Sesuai</button>
           <button class="btn sm ghost" onclick="promptVarianCp('${c.realisasiId}')">⚠ Varian</button>
         </td>` : ''}
@@ -6713,6 +6721,11 @@ function renderChecklistCpBox(){
 async function submitRealisasiCp(realisasiId, status){
   const r = await api('cp.realisasiTandai', {realisasiId, status}, 'POST');
   if(r.ok){ await bukaChecklistCp(window.__cpChecklistDetail.header.id); await renderCpKunjunganTerpilih(); }
+  else toast(r.msg||'Gagal menyimpan');
+}
+async function submitRealisasiCpDariDeteksi(realisasiId){
+  const r = await api('cp.realisasiTandai', {realisasiId, status:'Sesuai', dariDeteksi:true}, 'POST');
+  if(r.ok){ toast('Ditandai Sesuai (dikonfirmasi dari deteksi otomatis)'); await bukaChecklistCp(window.__cpChecklistDetail.header.id); await renderCpKunjunganTerpilih(); }
   else toast(r.msg||'Gagal menyimpan');
 }
 async function promptVarianCp(realisasiId){
