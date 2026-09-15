@@ -2331,7 +2331,21 @@ async function submitTindakan(){
   const r = editId
     ? await api("tindakan.edit", {id: editId, kodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama, kombinasiPelaksanaId, pelaksanaSlot}, "POST")
     : await api("tambahTindakan", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, kodeICD9:val("kodeICD9"), KodeICD9:val("kodeICD9"), deskripsi:val("deskTindakan"), Deskripsi:val("deskTindakan"), pelaksanaId: pelPilih.id, pelaksana: pelPilih.nama, kombinasiPelaksanaId, pelaksanaSlot}, "POST");
-  if(r.ok){ toast(editId ? "Tindakan diperbarui" : "Tindakan ditambahkan"); batalEditTindakan(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
+  if(r.ok){
+    const labelDasar = editId ? "Tindakan diperbarui" : "Tindakan ditambahkan";
+    // r.billingOtomatis: true kalau tarif tindakan ini ketemu & langsung
+    // masuk ke Billing otomatis. Kalau false, staf perlu tahu supaya tidak
+    // mengira tindakan ini sudah tertagih padahal belum (mis. tarifnya
+    // belum diatur di menu Tarif Tindakan) -- baris Billing tidak akan
+    // muncul sendiri kalau ini terjadi, jadi wajib ditagih manual dari
+    // menu Billing.
+    if(r.billingOtomatis){
+      toast(`${labelDasar} — otomatis masuk Billing (Rp${Number(r.tarifDipakai||0).toLocaleString('id-ID')})`);
+    } else {
+      toast(`${labelDasar} — ⚠️ BELUM masuk Billing otomatis (tarif untuk tindakan ini belum diatur di menu Tarif Tindakan). Tambahkan manual lewat menu Billing kalau perlu ditagih.`);
+    }
+    batalEditTindakan(); await renderPertahankanAnalisaSaran();
+  } else { toast(r.msg || (editId ? "Gagal memperbarui tindakan" : "Gagal menambahkan tindakan")); }
 }
 async function mulaiEditTindakan(x){
   document.getElementById("tindakanFormTitle").textContent = "Ubah Tindakan";
