@@ -1753,6 +1753,40 @@ function kotakCariHtml(containerId, placeholder){
   return `<div style="margin-bottom:10px"><input id="${inputId}" oninput="renderFilteredList('${containerId}')" placeholder="${placeholder || 'Cari...'}"></div>`;
 }
 
+/* ============ Simplifikasi daftar transaksi harian (Farmasi/Lab/Radiologi/
+   Gizi/CSSD/Linen/Jenazah) supaya tidak "panjang lebar" saat volume pasien
+   tinggi (400+/hari): (1) filter tanggal -- kosongkan = hari ini, yang masih
+   berjalan/belum selesai tetap selalu ikut tampil apa pun tanggalnya; (2)
+   baris yang statusnya sudah final diringkas jadi satu baris, klik untuk
+   buka detail lengkap (accordion), supaya ratusan baris riwayat tidak
+   membuat halaman jadi sangat panjang. Dipakai bersama di semua daftar
+   order/resep unit penunjang. ============ */
+function filterTanggalDaftarHtml(){
+  return `<div class="row" style="align-items:flex-end;gap:10px;margin:8px 0 4px">
+    <div><label>Dari Tanggal</label><input id="pjf_dari" type="date"></div>
+    <div><label>Sampai Tanggal</label><input id="pjf_sampai" type="date"></div>
+    <div><button class="btn sm" onclick="window.__pjfReload && window.__pjfReload()">Tampilkan</button></div>
+  </div>
+  <p class="hint" style="margin-bottom:8px">💡 Kosongkan tanggal untuk melihat data <b>hari ini</b>. Yang masih berjalan/menunggu tindak lanjut selalu tetap tampil apa pun tanggalnya — tidak akan "hilang" walau sudah lewat hari. Yang sudah selesai ditampilkan ringkas satu baris — klik untuk buka detailnya.</p>`;
+}
+function bungkusRiwayatRingkas(headerHtml, detailHtml, idKey){
+  const domId = 'riw_' + String(idKey).replace(/[^a-zA-Z0-9_]/g, '');
+  return `<div class="card" style="margin-bottom:6px;padding:10px 14px;cursor:pointer" onclick="toggleRiwayatRingkas('${domId}')">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;flex:1">${headerHtml}</div>
+      <span class="hint" id="${domId}_panah">▾ detail</span>
+    </div>
+    <div id="${domId}" hidden style="margin-top:10px;cursor:auto" onclick="event.stopPropagation()">${detailHtml}</div>
+  </div>`;
+}
+function toggleRiwayatRingkas(domId){
+  const el = document.getElementById(domId);
+  if(!el) return;
+  el.hidden = !el.hidden;
+  const panah = document.getElementById(domId+'_panah');
+  if(panah) panah.textContent = el.hidden ? '▾ detail' : '▴ tutup';
+}
+
 /* ============ Pencarian kode ICD-10 / ICD-9-CM ============ */
 let searchDebounce;
 function cariKode(inputId, boxId, searchFn){
@@ -3595,11 +3629,16 @@ async function renderPenunjangTab(tab){
       <button class="btn" onclick="pjSubmitPenunjangDenganTarif('${tab}.buatOrder','pj_dokterId','pj_dokterManual',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisPemeriksaan:val('pj_jenis'),harga:Number(val('pj_harga'))||0,petugas:state.user.nama})">Simpan Order ${label}</button>
       ${!bolehIsiHasil ? `<p class="hint">Akun Anda tidak punya modul "${label}" — hanya bisa membuat order, tidak bisa mengisi hasil. Isi hasil dilakukan oleh petugas ${label.toLowerCase()} sungguhan.</p>` : ""}
       <div class="section-title" style="margin-top:16px">Daftar Order ${label}</div>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>`;
     await isiSelectTarifUnit('pj_kodeTarif', unitTarif);
     await isiSelectPegawai('pj_dokterId');
-    const rows = await api(tab+'.listOrder', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderOrderList(rows, tab, bolehIsiHasil);
+    async function muatDaftarOrderIni(){
+      const rows = await api(tab+'.listOrder', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderOrderList(rows, tab, bolehIsiHasil);
+    }
+    window.__pjfReload = muatDaftarOrderIni;
+    await muatDaftarOrderIni();
   } else if (tab === 'farmasi') {
     const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('farmasi');
     const obatRows = await api('farmasi.listObat', {}, 'POST');
@@ -3608,7 +3647,8 @@ async function renderPenunjangTab(tab){
     resepCart = [];
     body.innerHTML = `
       <div class="section-title">📋 Daftar Resep</div>
-      <p class="hint">Resep yang baru diinput dokter (status "Diproses") ditampilkan paling atas, dari yang paling lama menunggu — supaya langsung terlihat begitu membuka menu ini, tanpa perlu scroll ke bawah.</p>
+      <p class="hint">Resep yang baru diinput dokter (status "Diproses") ditampilkan paling atas, dari yang paling lama menunggu — supaya langsung terlihat begitu membuka menu ini, tanpa perlu scroll ke bawah, dan SELALU tampil apa pun tanggalnya. Resep yang sudah selesai (Diserahkan/Ditolak) diringkas satu baris per resep.</p>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>
       <div class="section-title" style="margin-top:20px">Buat Resep Baru</div>
       <div style="position:relative;"><label>No. RM</label>
@@ -3717,8 +3757,12 @@ async function renderPenunjangTab(tab){
       await isiSelectPegawaiPolos('tplDokterId', '-- Pilih Dokter --');
       await isiSelectPoliFavorit('tplPoliKode', '-- Pilih Poli --');
     }
-    const resepRows = await api('farmasi.listResep', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
+    async function muatDaftarResepIni(){
+      const resepRows = await api('farmasi.listResep', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderResepList(resepRows, bolehKelola);
+    }
+    window.__pjfReload = muatDaftarResepIni;
+    await muatDaftarResepIni();
     if(bolehKelola) await muatObatKadaluarsa();
     if(bolehKelola) await muatPrediksiStokFarmasi();
   } else if (tab === 'gizi') {
@@ -3740,11 +3784,16 @@ async function renderPenunjangTab(tab){
       <label>Alergi/Pantangan</label><input id="pj_alergi" placeholder="Terisi otomatis dari data pasien kalau ditemukan">
       <button class="btn" onclick="pjSubmitPenunjangDenganTarif('gizi.buatOrder','pj_dokterId','pj_dokterManual',{noRm:val('pj_norm'),namaPasien:val('pj_nama'),ruangKelas:val('pj_ruang'),kodeTarif:val('pj_kodeTarif')||undefined,jenisDiet:val('pj_jenis'),alergi:val('pj_alergi'),petugas:state.user.nama},'dokterId','dokter')">Simpan Order Diet</button>
       <div class="section-title" style="margin-top:16px">Daftar Order Gizi</div>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>`;
     await isiSelectTarifUnit('pj_kodeTarif', 'gizi');
     await isiSelectPegawai('pj_dokterId');
-    const rows = await api('gizi.listAktif', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderGiziList(rows, bolehProsesGizi);
+    async function muatDaftarGiziIni(){
+      const rows = await api('gizi.listAktif', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderGiziList(rows, bolehProsesGizi);
+    }
+    window.__pjfReload = muatDaftarGiziIni;
+    await muatDaftarGiziIni();
   } else if (tab === 'cssd') {
     const bolehProsesCssd = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('cssd');
     body.innerHTML = `
@@ -3758,10 +3807,15 @@ async function renderPenunjangTab(tab){
       <button class="btn" onclick="pjSubmit('cssd.terimaAlat',{noRm:val('pj_norm')||undefined,unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisAlat:val('pj_jenis'),jumlah:Number(val('pj_jumlah'))||1,petugas:state.user.nama})">Simpan</button>
       <p class="hint">Biaya CSSD hanya otomatis masuk Billing kalau No. RM diisi DAN cocok dengan kunjungan aktif pasien tsb.</p>
       <div class="section-title" style="margin-top:16px">Daftar Alat CSSD</div>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>`;
     await isiSelectTarifUnit('pj_kodeTarif', 'cssd');
-    const rows = await api('cssd.listAktif', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderCssdList(rows, bolehProsesCssd);
+    async function muatDaftarCssdIni(){
+      const rows = await api('cssd.listAktif', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderCssdList(rows, bolehProsesCssd);
+    }
+    window.__pjfReload = muatDaftarCssdIni;
+    await muatDaftarCssdIni();
   } else if (tab === 'linen') {
     const bolehProsesLinen = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('linen');
     body.innerHTML = `
@@ -3775,10 +3829,15 @@ async function renderPenunjangTab(tab){
       <button class="btn" onclick="pjSubmit('linen.setorKotor',{noRm:val('pj_norm')||undefined,unitAsal:val('pj_unit'),kodeTarif:val('pj_kodeTarif')||undefined,jenisLinen:val('pj_jenis'),jumlahKotor:Number(val('pj_jumlah'))||0,petugas:state.user.nama})">Simpan</button>
       <p class="hint">Biaya Linen hanya otomatis masuk Billing kalau No. RM diisi DAN cocok dengan kunjungan aktif pasien tsb.</p>
       <div class="section-title" style="margin-top:16px">Daftar Linen Diproses</div>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>`;
     await isiSelectTarifUnit('pj_kodeTarif', 'linen');
-    const rows = await api('linen.listProses', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderLinenList(rows, bolehProsesLinen);
+    async function muatDaftarLinenIni(){
+      const rows = await api('linen.listProses', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderLinenList(rows, bolehProsesLinen);
+    }
+    window.__pjfReload = muatDaftarLinenIni;
+    await muatDaftarLinenIni();
   } else if (tab === 'jenazah') {
     const bolehProsesJenazah = state.user.role === 'admin' || state.user.role === 'kasir' || state.user.role === 'rekam_medis' || (state.user.modul||[]).includes('jenazah');
     const tarifJenazah = await getTarifUnitCache('jenazah', true);
@@ -3814,9 +3873,14 @@ async function renderPenunjangTab(tab){
         <button class="btn" style="margin-top:8px" onclick="submitJenazahBaru()">Simpan Kasus</button>
       </div>` : `<p class="hint">Akun Anda tidak punya modul "Pemulasaraan Jenazah" — hanya bisa melihat daftar, tidak bisa mencatat kasus baru.</p>`}
       <div class="section-title">Daftar Kasus</div>
+      ${filterTanggalDaftarHtml()}
       <div id="pjList"></div>`;
-    const rows = await api('jenazah.list', {}, 'POST');
-    document.getElementById('pjList').innerHTML = renderJenazahList(rows, bolehProsesJenazah);
+    async function muatDaftarJenazahIni(){
+      const rows = await api('jenazah.list', {tanggalMulai: val('pjf_dari'), tanggalSelesai: val('pjf_sampai')}, 'POST');
+      document.getElementById('pjList').innerHTML = renderJenazahList(rows, bolehProsesJenazah);
+    }
+    window.__pjfReload = muatDaftarJenazahIni;
+    await muatDaftarJenazahIni();
   } else if (tab === 'bhp') {
     const bolehKelola = state.user.role === 'admin' || state.user.role === 'kasir' || (state.user.modul||[]).includes('bhp');
     const bhpRows = await api('bhp.list', {}, 'POST');
@@ -3915,19 +3979,23 @@ async function submitTambahStokBhp(){
 /* ===== Gizi: tandai sudah disajikan ===== */
 function renderGiziList(rows, bolehProses){
   if(!rows || !rows.length) return '<div class="empty">Belum ada order gizi</div>';
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Ruang_Kelas||"-"} — ${r.Jenis_Diet||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokter ? ` — Dokter: ${r.dokter}` : ""}</div>
-        <span class="badge ${r.Status==='Disajikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Aktif'}</span>
-      </div>
-      ${r.Status==='Disajikan'
+  return rows.map(r => {
+    const header = `<div><b>${r.Nama_Pasien||"-"}</b> — ${r.Ruang_Kelas||"-"} — ${r.Jenis_Diet||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokter ? ` — Dokter: ${r.dokter}` : ""}</div>
+        <span class="badge ${r.Status==='Disajikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Aktif'}</span>`;
+    const detail = r.Status==='Disajikan'
         ? `<div class="hint" style="margin-top:6px">Disajikan oleh ${r.petugasSaji||"-"}, ${new Date(r.waktuDisajikan).toLocaleString('id-ID')}</div>`
         : r.Status==='Dibatalkan'
           ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>`
           : (bolehProses ? `<button class="btn sm" style="margin-top:6px" onclick="giziTandaiDisajikan('${r.id}')">🍽️ Tandai Sudah Disajikan</button>
-              <button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('gizi.batalkan','${r.id}','gizi')">Batalkan</button>` : `<div class="hint" style="margin-top:6px">Menunggu disajikan</div>`)}
-    </div>`).join("");
+              <button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('gizi.batalkan','${r.id}','gizi')">Batalkan</button>` : `<div class="hint" style="margin-top:6px">Menunggu disajikan</div>`);
+    if(r.Status==='Disajikan' || r.Status==='Dibatalkan'){
+      return bungkusRiwayatRingkas(header, detail, 'gizi_'+r.id);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 async function giziTandaiDisajikan(id){
   const r = await api('gizi.setDisajikan', {id, petugas: state.user.nama}, 'POST');
@@ -3949,18 +4017,23 @@ async function batalkanOrderPenunjang(action, id, tab){
 function renderCssdList(rows, bolehProses){
   if(!rows || !rows.length) return '<div class="empty">Belum ada data CSSD</div>';
   const langkahBerikut = {Diterima:'Disterilkan', Disterilkan:'Dikembalikan'};
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Alat_Set||"-"} (${r.Jumlah||1})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
-        <span class="badge ${r.Status==='Dikembalikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>
-      </div>
+  return rows.map(r => {
+    const header = `<div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Alat_Set||"-"} (${r.Jumlah||1})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
+        <span class="badge ${r.Status==='Dikembalikan'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>`;
+    const detail = `
       <div class="hint" style="margin-top:4px">
         ${r.waktuSteril ? `Disterilkan: ${new Date(r.waktuSteril).toLocaleString('id-ID')}. ` : ""}${r.waktuKembali ? `Dikembalikan: ${new Date(r.waktuKembali).toLocaleString('id-ID')} oleh ${r.petugasProses||"-"}` : ""}${r.Status==='Dibatalkan' ? `Dibatalkan — alasan: ${r.alasanBatal||"-"}` : ""}
       </div>
       ${(bolehProses && langkahBerikut[r.Status]) ? `<button class="btn sm" style="margin-top:6px" onclick="cssdLanjutStatus('${r.ID_CSSD}','${langkahBerikut[r.Status]}')">➡️ Tandai ${langkahBerikut[r.Status]}</button>` : ""}
-      ${(bolehProses && r.Status==='Diterima') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('cssd.batalkan','${r.ID_CSSD}','cssd')">Batalkan</button>` : ""}
-    </div>`).join("");
+      ${(bolehProses && r.Status==='Diterima') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('cssd.batalkan','${r.ID_CSSD}','cssd')">Batalkan</button>` : ""}`;
+    if(r.Status==='Dikembalikan' || r.Status==='Dibatalkan'){
+      return bungkusRiwayatRingkas(header, detail, 'cssd_'+r.ID_CSSD);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 async function cssdLanjutStatus(id, statusBaru){
   const r = await api('cssd.updateStatus', {id, statusBaru, petugas: state.user.nama}, 'POST');
@@ -3970,13 +4043,10 @@ async function cssdLanjutStatus(id, statusBaru){
 /* ===== Linen: tandai bersih & dikembalikan ===== */
 function renderLinenList(rows, bolehProses){
   if(!rows || !rows.length) return '<div class="empty">Belum ada data linen</div>';
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Linen||"-"} (kotor: ${r.Jumlah_Kotor||0})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
-        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Proses'}</span>
-      </div>
-      ${r.Status==='Selesai'
+  return rows.map(r => {
+    const header = `<div><b>${r.Unit_Asal||"-"}</b> — ${r.Jenis_Linen||"-"} (kotor: ${r.Jumlah_Kotor||0})${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}</div>
+        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status||'Proses'}</span>`;
+    const detail = r.Status==='Selesai'
         ? `<div class="hint" style="margin-top:6px">Bersih &amp; dikembalikan: ${r.Jumlah_Bersih??0} — oleh ${r.petugasKembali||"-"}, ${new Date(r.waktuKembali).toLocaleString('id-ID')}</div>`
         : r.Status==='Dibatalkan'
           ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>`
@@ -3984,8 +4054,15 @@ function renderLinenList(rows, bolehProses){
           <div class="row" style="margin-top:6px"><input id="linenBersih_${r.ID_Linen}" type="number" placeholder="Jumlah bersih">
           <button class="btn sm" onclick="linenTandaiBersih('${r.ID_Linen}')">🧺 Tandai Bersih &amp; Dikembalikan</button>
           <button class="btn sm danger" onclick="batalkanOrderPenunjang('linen.batalkan','${r.ID_Linen}','linen')">Batalkan</button></div>
-        ` : `<div class="hint" style="margin-top:6px">Masih diproses</div>`)}
-    </div>`).join("");
+        ` : `<div class="hint" style="margin-top:6px">Masih diproses</div>`);
+    if(r.Status==='Selesai' || r.Status==='Dibatalkan'){
+      return bungkusRiwayatRingkas(header, detail, 'linen_'+r.ID_Linen);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 async function linenTandaiBersih(id){
   const jumlahBersih = Number(val('linenBersih_'+id))||0;
@@ -4014,12 +4091,10 @@ function renderJenazahList(rows, bolehProses){
   if(!rows || !rows.length) return '<div class="empty">Belum ada kasus pemulasaraan jenazah</div>';
   const langkahBerikut = {'Menunggu':'Diproses', 'Diproses':'Selesai', 'Selesai':'Diambil Keluarga'};
   const badgeCls = {'Menunggu':'muted','Diproses':'warn','Selesai':'ok','Diambil Keluarga':'ok','Dibatalkan':'danger'};
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.namaPasien||"-"}</b>${r.noRm ? ` (${r.noRm})` : ""} — ${r.ruangAsal||"-"}</div>
-        <span class="badge ${badgeCls[r.status]||'muted'}">${r.status}</span>
-      </div>
+  return rows.map(r => {
+    const header = `<div><b>${r.namaPasien||"-"}</b>${r.noRm ? ` (${r.noRm})` : ""} — ${r.ruangAsal||"-"}</div>
+        <span class="badge ${badgeCls[r.status]||'muted'}">${r.status}</span>`;
+    const detail = `
       <div class="hint" style="margin-top:4px">
         Keluarga: ${r.keluargaPenanggungjawab||"-"} (${r.kontakKeluarga||"-"})
         ${r.tanggalMeninggal ? ` · Meninggal: ${new Date(r.tanggalMeninggal).toLocaleString('id-ID')}` : ""}
@@ -4034,8 +4109,15 @@ function renderJenazahList(rows, bolehProses){
           ? `${langkahBerikut[r.status]==='Diambil Keluarga' ? `<input id="jzPetugasServis_${r.id}" placeholder="Nama petugas serah terima" style="margin-top:6px">` : ""}
              <button class="btn sm" style="margin-top:6px" onclick="jenazahLanjutStatus('${r.id}','${langkahBerikut[r.status]}')">➡️ Tandai ${langkahBerikut[r.status]}</button>
              ${(bolehProses && r.status==='Menunggu') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('jenazah.batalkan','${r.id}','jenazah')">Batalkan</button>` : ""}`
-          : ""}
-    </div>`).join("");
+          : ""}`;
+    if(r.status==='Diambil Keluarga' || r.status==='Dibatalkan'){
+      return bungkusRiwayatRingkas(header, detail, 'jenazah_'+r.id);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 async function jenazahLanjutStatus(id, statusBaru){
   const petugasEl = document.getElementById('jzPetugasServis_'+id);
@@ -4285,12 +4367,10 @@ function pjTable(rows, cols){
 /* ===== Lab & Radiologi: isi hasil pemeriksaan ===== */
 function renderOrderList(rows, jenis, bolehIsiHasil){
   if(!rows || !rows.length) return '<div class="empty">Belum ada order</div>';
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.Nama_Pasien||"-"}</b> — ${r.Jenis_Pemeriksaan||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokterPengirim ? ` — Dokter Pengirim: ${r.dokterPengirim}` : ""}</div>
-        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>
-      </div>
+  return rows.map(r => {
+    const header = `<div><b>${r.Nama_Pasien||"-"}</b> — ${r.Jenis_Pemeriksaan||"-"}${r.harga ? ` — Rp ${Number(r.harga).toLocaleString('id-ID')}` : ""}${r.dokterPengirim ? ` — Dokter Pengirim: ${r.dokterPengirim}` : ""}</div>
+        <span class="badge ${r.Status==='Selesai'?'ok':(r.Status==='Dibatalkan'?'danger':'muted')}">${r.Status}</span>`;
+    const detail = `
       ${r.Status==='Dibatalkan' ? `<div class="hint" style="margin-top:6px">Dibatalkan — alasan: ${r.alasanBatal||"-"}</div>` : r.hasil ? `
         <div style="margin-top:6px"><b>Hasil:</b> ${r.hasil}</div>
         <div class="hint">Diisi oleh ${r.namaPengisiHasil||"-"} (${r.profesiPengisiHasil||"-"}), ${new Date(r.waktuHasil).toLocaleString('id-ID')}</div>
@@ -4319,8 +4399,15 @@ function renderOrderList(rows, jenis, bolehIsiHasil){
         </div>
         <button class="btn sm" style="margin-top:6px" onclick="isiHasilPemeriksaan('${jenis}','${r.ID_Order}')">Simpan Hasil</button>
       ` : `<div class="hint" style="margin-top:6px">Belum ada hasil</div>`)}
-      ${(r.Status==='Menunggu') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('${jenis}.batalkan','${r.ID_Order}','${jenis}')">Batalkan</button>` : ""}
-    </div>`).join("");
+      ${(r.Status==='Menunggu') ? `<button class="btn sm danger" style="margin-top:6px" onclick="batalkanOrderPenunjang('${jenis}.batalkan','${r.ID_Order}','${jenis}')">Batalkan</button>` : ""}`;
+    if(r.Status==='Selesai' || r.Status==='Dibatalkan'){
+      return bungkusRiwayatRingkas(header, detail, jenis+'_'+r.ID_Order);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 function toggleFormKritis(orderId){
   const el = document.getElementById('areaKritis_'+orderId);
@@ -4612,12 +4699,10 @@ async function hapusTemplatePoli(id){
 }
 function renderResepList(rows, bolehKelola){
   if(!rows || !rows.length) return '<div class="empty">Belum ada resep</div>';
-  return rows.map(r => `
-    <div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div><b>${r.namaPasien}</b> — ${r.noRm} <span class="hint">(${r.dokter||"-"})</span> ${r.adaObatHighAlert?'<span class="badge danger">⚠️ Mengandung High-Alert</span>':''} ${r.adaPeringatanAlergi?'<span class="badge warn">🚫 Potensi Alergi</span>':''}</div>
-        <span class="badge ${r.status==='Diserahkan'?'ok':(r.status==='Ditolak'?'danger':'muted')}">${r.status}</span>
-      </div>
+  return rows.map(r => {
+    const header = `<div><b>${r.namaPasien}</b> — ${r.noRm} <span class="hint">(${r.dokter||"-"})</span> ${r.adaObatHighAlert?'<span class="badge danger">⚠️ Mengandung High-Alert</span>':''} ${r.adaPeringatanAlergi?'<span class="badge warn">🚫 Potensi Alergi</span>':''}</div>
+        <span class="badge ${r.status==='Diserahkan'?'ok':(r.status==='Ditolak'?'danger':'muted')}">${r.status}</span>`;
+    const detail = `
       <table style="margin-top:6px"><tr><th>Obat</th><th>Jumlah</th><th>Aturan Pakai</th><th>Stok Tersedia</th></tr>
         ${(r.items||[]).map(i=>`<tr><td>${i.namaObat||i.kodeObat}${i.isHighAlert?' <span class="badge danger">High-Alert</span>':''}${i.pasanganLasa?`<div class="hint">LASA — mirip: ${i.pasanganLasa}</div>`:''}</td><td>${i.jumlah}${i.satuan?(" "+i.satuan):""}</td><td>${i.aturanPakai||"-"}</td><td style="${(i.stokTersedia==null||i.stokTersedia<i.jumlah)?'color:var(--red)':''}">${i.stokTersedia ?? "tidak ada di master"}</td></tr>`).join("")}
       </table>
@@ -4629,8 +4714,15 @@ function renderResepList(rows, bolehKelola){
           <button class="btn sm" onclick="serahkanResep('${r.id}', ${r.adaObatHighAlert?'true':'false'}, ${r.adaPeringatanAlergi?'true':'false'})">✅ Verifikasi &amp; Serahkan</button>
           <button class="btn sm ghost" onclick="tolakResep('${r.id}')">❌ Tolak</button>
         </div>` : ""}
-      ${r.namaApoteker ? `<div class="hint" style="margin-top:6px">Diproses oleh ${r.namaApoteker} (${r.profesiApoteker||"-"}), ${new Date(r.waktuDiserahkan).toLocaleString('id-ID')}${r.catatanApoteker?(" — "+r.catatanApoteker):""}${r.namaVerifikatorKedua?(" — Verifikator kedua: "+r.namaVerifikatorKedua):""}${r.catatanOverrideAlergi?(" — Tinjauan alergi: "+r.catatanOverrideAlergi):""}</div>` : ""}
-    </div>`).join("");
+      ${r.namaApoteker ? `<div class="hint" style="margin-top:6px">Diproses oleh ${r.namaApoteker} (${r.profesiApoteker||"-"}), ${new Date(r.waktuDiserahkan).toLocaleString('id-ID')}${r.catatanApoteker?(" — "+r.catatanApoteker):""}${r.namaVerifikatorKedua?(" — Verifikator kedua: "+r.namaVerifikatorKedua):""}${r.catatanOverrideAlergi?(" — Tinjauan alergi: "+r.catatanOverrideAlergi):""}</div>` : ""}`;
+    if(r.status !== 'Diproses'){
+      return bungkusRiwayatRingkas(header, detail, 'resep_'+r.id);
+    }
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">${header}</div>
+      ${detail}
+    </div>`;
+  }).join("");
 }
 async function serahkanResep(id, adaHighAlert, adaAlergi){
   const payload = {resepId:id};
