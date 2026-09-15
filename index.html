@@ -3607,7 +3607,10 @@ async function renderPenunjangTab(tab){
     const obatOptions = (obatRows||[]).map(o=>`<option value="${o.kode}">${o.namaObat} (stok ${o.stok}${o.satuan?(' '+o.satuan):''})</option>`).join("");
     resepCart = [];
     body.innerHTML = `
-      <div class="section-title">Buat Resep Baru</div>
+      <div class="section-title">📋 Daftar Resep</div>
+      <p class="hint">Resep yang baru diinput dokter (status "Diproses") ditampilkan paling atas, dari yang paling lama menunggu — supaya langsung terlihat begitu membuka menu ini, tanpa perlu scroll ke bawah.</p>
+      <div id="pjList"></div>
+      <div class="section-title" style="margin-top:20px">Buat Resep Baru</div>
       <div style="position:relative;"><label>No. RM</label>
         <input id="pj_norm" placeholder="Ketik No. RM atau nama pasien..." autocomplete="off" oninput="cariPasienSaran('pj_norm','pj_saranPasien','pj_nama','pj_namaHint')" onblur="cariPasienOtomatis('pj_norm','pj_nama','pj_namaHint')">
         <div id="pj_saranPasien" class="suggest-box"></div>
@@ -3705,9 +3708,7 @@ async function renderPenunjangTab(tab){
       </div>
       <div id="farmasiPrediksiKpi" class="grid cols3" style="margin-top:10px"></div>
       <div id="farmasiPrediksiStok" style="margin-top:10px">Memuat...</div>
-      ` : ""}
-      <div class="section-title" style="margin-top:20px">Daftar Resep</div>
-      <div id="pjList"></div>`;
+      ` : ""}`;
     await isiSelectPegawai('pj_dokterId');
     await isiSelectPoliFavorit('pj_poliFavorit');
     renderKeranjangResep();
