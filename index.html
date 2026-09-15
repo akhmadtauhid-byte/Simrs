@@ -4836,7 +4836,7 @@ async function ubahStatusKeluhan(id, status){
 /* ================== DASHBOARD INDIKATOR MUTU ================== */
 async function pageKepatuhanAntrianBpjs(el){
   el.innerHTML = `<h1>📡 Kepatuhan Antrian Online BPJS</h1>
-    <p class="sub">Pemantauan submit 7 checkpoint (taskid) Antrean Online BPJS — dari Pendaftaran sampai Obat Diserahkan — khusus pasien berpenjamin BPJS. Target kepatuhan BPJS Kesehatan: <b>97%</b>. Validasi urutan berjalan <b>otomatis</b> mengikuti proses yang sudah ada (pendaftaran, isi SEP, panggil antrian, diagnosa dokter, resep, penyerahan obat) — begitu ada tahap yang diinput melompat, sistem TETAP menyimpan inputnya tapi menandainya <b>"Pending"</b> + mencatat tahap mana yang bolong, supaya mudah ditindaklanjuti tanpa menghalangi pekerjaan staf.</p>
+    <p class="sub">Pemantauan submit 7 checkpoint (taskid) Antrean Online BPJS — dari Pendaftaran sampai Obat Diserahkan — khusus pasien berpenjamin BPJS. Target kepatuhan RS: <b>100%</b> (di atas ketentuan minimal BPJS Kesehatan 97%). Validasi urutan berjalan <b>otomatis</b> mengikuti proses yang sudah ada (pendaftaran, isi SEP, panggil antrian, diagnosa dokter, resep, penyerahan obat) — begitu ada tahap yang diinput melompat, sistem TETAP menyimpan inputnya tapi menandainya <b>"Pending"</b> + mencatat tahap mana yang bolong, supaya mudah ditindaklanjuti tanpa menghalangi pekerjaan staf.</p>
     <div class="card" style="margin-bottom:14px">
       <div class="row">
         <div><label>Dari Tanggal</label><input id="ka_dari" type="date"></div>
@@ -4869,12 +4869,12 @@ async function muatKepatuhanAntrian(){
   const daftarPending = (Array.isArray(pending) ? pending : []);
   box.innerHTML = `
     <div class="grid cols4">
-      <div class="card stat" style="border-color:${warnaUtama}"><b style="color:${warnaUtama}">${d.persenLengkap}%</b><span>Kunjungan BPJS dengan 7 Tahap Lengkap (target 97%)</span></div>
+      <div class="card stat" style="border-color:${warnaUtama}"><b style="color:${warnaUtama}">${d.persenLengkap}%</b><span>Kunjungan BPJS dengan 7 Tahap Lengkap (target ${d.targetPersen}%)</span></div>
       <div class="card stat"><b>${d.persenTanpaBolong}%</b><span>Lengkap TANPA pernah melompat urutan</span></div>
       <div class="card stat"><b>${d.totalKunjunganBPJS}</b><span>Total Kunjungan BPJS periode ini</span></div>
       <div class="card stat" style="border-color:${d.kunjunganPending>0?'var(--amber)':''}"><b style="color:${d.kunjunganPending>0?'var(--amber)':''}">${d.kunjunganPending}</b><span>Kunjungan Berstatus "Pending" (perlu tindak lanjut)</span></div>
     </div>
-    ${gap < 0 ? `<div class="flag-item warn" style="margin-top:12px">⚠️ Kepatuhan periode ini <b>${d.persenLengkap}%</b>, masih <b>${Math.abs(gap).toFixed(1)} poin</b> di bawah target BPJS 97% — lihat daftar "Perlu Tindak Lanjut" di bawah untuk tahu tahap mana yang paling sering bolong.</div>` : `<div class="flag-item ok" style="margin-top:12px">✅ Kepatuhan periode ini <b>${d.persenLengkap}%</b>, sudah memenuhi target BPJS 97%.</div>`}
+    ${gap < 0 ? `<div class="flag-item warn" style="margin-top:12px">⚠️ Kepatuhan periode ini <b>${d.persenLengkap}%</b>, masih <b>${Math.abs(gap).toFixed(1)} poin</b> di bawah target ${d.targetPersen}% — lihat daftar "Perlu Tindak Lanjut" di bawah untuk tahu tahap mana yang paling sering bolong.</div>` : `<div class="flag-item ok" style="margin-top:12px">✅ Kepatuhan periode ini <b>${d.persenLengkap}%</b>, sudah memenuhi target ${d.targetPersen}%.</div>`}
     <div class="section-title" style="margin-top:16px">Rincian per Tahap (Taskid 1-7)</div>
     <table><tr><th>#</th><th>Tahap</th><th>Tercatat Tepat Waktu</th><th>Tercatat tapi Pending (lompat urutan)</th></tr>
       ${[1,2,3,4,5,6,7].map(i=>{
