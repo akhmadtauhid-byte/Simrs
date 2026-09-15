@@ -3709,6 +3709,8 @@ async function renderPenunjangTab(tab){
       </div>
       ${kotakCariHtml('obatMasterList', 'Cari kode/nama obat/nama generik...')}
       <div id="obatMasterList" style="margin-top:10px"></div>
+      <div class="section-title" style="margin-top:20px">📋 Stok Opname (Hitung Fisik &amp; Rekonsiliasi Stok)</div>
+      <div id="opnameArea">Memuat...</div>
       <div class="section-title" style="margin-top:20px">⏰ Obat Mendekati/Sudah Kadaluarsa</div>
       <div class="row">
         <div><label>Ambang Hari (tampilkan yang kadaluarsa dalam N hari)</label><input id="obatAmbangHari" type="number" value="90"></div>
@@ -3763,6 +3765,7 @@ async function renderPenunjangTab(tab){
     }
     window.__pjfReload = muatDaftarResepIni;
     await muatDaftarResepIni();
+    if(bolehKelola) await muatStokOpname();
     if(bolehKelola) await muatObatKadaluarsa();
     if(bolehKelola) await muatPrediksiStokFarmasi();
   } else if (tab === 'gizi') {
@@ -4432,20 +4435,25 @@ async function isiHasilPemeriksaan(jenis, orderId){
 /* ===== Farmasi: master obat & verifikasi resep ===== */
 function pjTableObat(rows, bolehEditHarga){
   if(!rows || !rows.length) return '<div class="empty">Belum ada obat di master</div>';
-  return `<div style="overflow-x:auto"><table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Beli (Rp)</th><th>Harga Jual (Rp)</th><th>Kronis</th><th>High-Alert</th><th>Status</th>${bolehEditHarga?'<th></th>':''}</tr>
+  return `<div style="overflow-x:auto"><table><tr><th>Kode</th><th>Nama Obat</th><th>Nama Generik</th><th>Stok</th><th>Stok Minimal</th><th>Satuan</th><th>Harga Beli (Rp)</th><th>Harga Jual (Rp)</th><th>Kronis</th><th>High-Alert / LASA</th><th>Status</th>${bolehEditHarga?'<th></th>':''}</tr>
     ${rows.map(o=>`<tr${o.stok<=o.stokMinimal?' style="color:var(--red)"':''}${o.aktif===false?' style="opacity:0.55"':''}>
       <td>${o.kode}</td>
       <td>${bolehEditHarga ? `<input id="obatNamaEdit_${o.kode}" value="${(o.namaObat||'').replace(/"/g,'&quot;')}" style="min-width:140px">` : o.namaObat}</td>
       <td class="hint">${bolehEditHarga ? `<input id="obatGenerikEdit_${o.kode}" value="${(o.namaGenerik||'').replace(/"/g,'&quot;')}" style="min-width:120px">` : (o.namaGenerik||"-")}</td>
       <td>${o.stok}</td>
       <td>${bolehEditHarga ? `<input id="obatStokMinEdit_${o.kode}" type="number" value="${o.stokMinimal}" style="width:70px">` : o.stokMinimal}</td>
-      <td>${o.satuan||"-"}</td>
+      <td>${bolehEditHarga ? `<input id="obatSatuanEdit_${o.kode}" value="${(o.satuan||'').replace(/"/g,'&quot;')}" style="width:80px">` : (o.satuan||"-")}</td>
       <td>Rp ${Number(o.hargaBeli||0).toLocaleString('id-ID')}<div class="hint">diperbarui otomatis dari Penerimaan</div></td>
       <td>${bolehEditHarga ? `<div style="display:flex;gap:4px;flex-wrap:wrap"><input id="obatHarga_${o.kode}" type="number" value="${o.hargaJual||0}" style="width:90px"><button class="btn sm" onclick="submitSetHargaObat('${o.kode}')">Simpan</button></div>` : `Rp ${Number(o.hargaJual||0).toLocaleString('id-ID')}`}${!o.hargaJual ? `<div class="hint" style="color:var(--red)">Belum diisi — obat ini belum bisa tertagih otomatis ke Billing</div>` : ""}
-        ${bolehEditHarga ? `<div class="hint">${o.hargaOtomatis ? '🔄 Otomatis dari margin' : '✋ Manual'} — <a href="#" onclick="event.preventDefault();submitToggleHargaOtomatis('${o.kode}',${!o.hargaOtomatis})">${o.hargaOtomatis?'matikan':'nyalakan lagi'} mode otomatis</a></div>` : ''}
+        ${bolehEditHarga ? `<div class="hint">${o.hargaOtomatis ? '🔄 Otomatis dari margin' : '✋ Manual'} — <a href="#" onclick="event.preventDefault();submitToggleHargaOtomatis('${o.kode}',${!o.hargaOtomatis})">${o.hargaOtomatis?'matikan':'nyalakan lagi'} mode otomatis</a>${o.hargaOtomatis ? `<br>Margin khusus obat ini (%, kosongkan = pakai margin default): <input id="obatMarginEdit_${o.kode}" type="number" value="${o.persenMarginOverride ?? ''}" style="width:60px">` : ''}</div>` : ''}
       </td>
       <td>${bolehEditHarga ? `<label style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" id="obatKronisEdit_${o.kode}" ${o.obatKronis?'checked':''}> Kronis</label><input id="obatKategoriKronisEdit_${o.kode}" value="${(o.kategoriKronis||'').replace(/"/g,'&quot;')}" placeholder="Kategori (mis. Diabetes)" style="margin-top:4px;min-width:120px">` : (o.obatKronis ? `<span class="badge ok">${o.kategoriKronis||'Kronis'}</span>` : '-')}</td>
-      <td>${o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-"}</td>
+      <td style="min-width:160px">${bolehEditHarga ? `
+        <label style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" id="obatHighAlertEdit_${o.kode}" ${o.isHighAlert?'checked':''}> ⚠️ High-Alert</label>
+        <input id="obatKategoriHighAlertEdit_${o.kode}" value="${(o.kategoriHighAlert||'').replace(/"/g,'&quot;')}" placeholder="Kategori (mis. Elektrolit Pekat)" style="margin-top:4px;min-width:140px">
+        <input id="obatPasanganLasaEdit_${o.kode}" value="${(o.pasanganLasa||'').replace(/"/g,'&quot;')}" placeholder="Mirip/LASA dengan obat..." style="margin-top:4px;min-width:140px">
+        <button class="btn sm ghost" style="margin-top:4px" onclick="submitSetHighAlertObat('${o.kode}')">Simpan High-Alert/LASA</button>
+      ` : (o.isHighAlert?`<span class="badge danger">⚠️ ${o.kategoriHighAlert||'High-Alert'}</span>${o.pasanganLasa?`<div class="hint">LASA: ${o.pasanganLasa}</div>`:""}`:"-")}</td>
       <td>${o.aktif===false ? '<span class="badge muted">Nonaktif</span>' : '<span class="badge ok">Aktif</span>'}</td>
       ${bolehEditHarga ? `<td style="white-space:nowrap">
         <button class="btn sm ghost" onclick="submitEditObat('${o.kode}')">Simpan Perubahan</button>
@@ -4453,7 +4461,7 @@ function pjTableObat(rows, bolehEditHarga){
         <button class="btn sm danger" onclick="submitHapusObat('${o.kode}')">Hapus</button>
       </td>` : ''}
     </tr>`).join("")}
-  </table></div>${bolehEditHarga ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau obat ini belum pernah dipakai di resep/batch manapun. Mengubah stok tetap wajib lewat "Tambah Stok" (bukan di sini) supaya riwayat batch/kadaluarsa tetap akurat. Harga beli & harga jual otomatis diperbarui lewat menu "📦 Pengadaan &amp; Distribusi Obat" saat ada Penerimaan baru.</p>' : ''}`;
+  </table></div>${bolehEditHarga ? '<p class="hint">Tombol "Hapus" hanya berhasil kalau obat ini belum pernah dipakai di resep/batch manapun. Mengubah ANGKA STOK tetap wajib lewat "Tambah Stok" (barang masuk baru, di bawah) atau "📋 Stok Opname" (koreksi hasil hitung fisik) — bukan di sini, supaya riwayat batch/ledger tetap akurat. Harga beli otomatis diperbarui lewat menu "📦 Pengadaan &amp; Distribusi Obat" saat ada Penerimaan baru. Perubahan High-Alert/LASA disimpan terpisah lewat tombolnya sendiri.</p>' : ''}`;
 }
 async function submitToggleHargaOtomatis(kode, hargaOtomatis){
   const r = await api('farmasi.setHargaOtomatis', {kode, hargaOtomatis}, 'POST');
@@ -4462,13 +4470,25 @@ async function submitToggleHargaOtomatis(kode, hargaOtomatis){
 async function submitEditObat(kode){
   const namaObat = val('obatNamaEdit_'+kode);
   if(!namaObat){ toast('Nama obat wajib diisi'); return; }
+  const marginEl = document.getElementById('obatMarginEdit_'+kode);
   const r = await api('farmasi.editObat', {
     kode, namaObat, namaGenerik: val('obatGenerikEdit_'+kode),
     stokMinimal: Number(val('obatStokMinEdit_'+kode))||0,
+    satuan: val('obatSatuanEdit_'+kode),
     obatKronis: document.getElementById('obatKronisEdit_'+kode) ? document.getElementById('obatKronisEdit_'+kode).checked : false,
-    kategoriKronis: val('obatKategoriKronisEdit_'+kode)
+    kategoriKronis: val('obatKategoriKronisEdit_'+kode),
+    persenMarginOverride: (marginEl && marginEl.value !== '') ? marginEl.value : undefined
   }, 'POST');
   if(r.ok){ toast('Perubahan obat disimpan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitSetHighAlertObat(kode){
+  const isHighAlert = document.getElementById('obatHighAlertEdit_'+kode).checked;
+  const r = await api('farmasi.setHighAlert', {
+    kode, isHighAlert,
+    kategoriHighAlert: val('obatKategoriHighAlertEdit_'+kode),
+    pasanganLasa: val('obatPasanganLasaEdit_'+kode)
+  }, 'POST');
+  if(r.ok){ toast('Status High-Alert/LASA disimpan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menyimpan');
 }
 async function submitSetAktifObat(kode, aktifBaru){
   const r = await api('farmasi.setAktifObat', {kode, aktif: aktifBaru}, 'POST');
@@ -4505,6 +4525,121 @@ async function submitTambahStok(){
   const r = await api('farmasi.tambahStok', {kode, jumlah:Number(val('obatJumlahTambah'))||0, noBatch, tanggalKadaluarsa}, 'POST');
   if(r.ok){ toast('Stok & batch ditambahkan'); renderPenunjangTab('farmasi'); } else toast(r.msg || 'Gagal menambah stok');
 }
+
+/* ===== Stok Opname: hitung fisik & rekonsiliasi stok sistem vs stok riil =====
+   Alur: mulai sesi (snapshot stok sistem semua obat aktif) -> petugas isi
+   hasil hitung fisik per obat (bisa dicicil beberapa hari) -> selesaikan
+   (stok sistem SEKARANG disesuaikan sebesar selisih, tercatat ke riwayat
+   mutasi obat kategori "Koreksi") ATAU batalkan (tidak menyentuh stok). */
+async function muatStokOpname(){
+  const box = document.getElementById('opnameArea');
+  if(!box) return;
+  box.innerHTML = 'Memuat...';
+  const daftar = await api('farmasi.opnameList', {}, 'POST');
+  const draft = (daftar||[]).find(s=>s.status==='Draft');
+  if(draft){
+    await muatDetailOpname(draft.id);
+  } else {
+    box.innerHTML = `
+      <p class="hint">Bandingkan stok fisik (hasil hitung langsung di rak/gudang) dengan stok yang tercatat di sistem. Kalau ada selisih, stok sistem akan disesuaikan otomatis begitu sesi diselesaikan, dengan jejak audit lengkap di riwayat mutasi obat (kategori "Koreksi"). Hitungan boleh dicicil beberapa hari — sesi tidak hangus sebelum diselesaikan/dibatalkan.</p>
+      <button class="btn sm" onclick="submitMulaiOpname()">🆕 Mulai Stok Opname Baru</button>
+      <div class="section-title" style="margin-top:16px">Riwayat Sesi Stok Opname</div>
+      ${renderRiwayatOpname(daftar)}
+    `;
+  }
+}
+function renderRiwayatOpname(rows){
+  if(!rows || !rows.length) return '<div class="empty">Belum ada riwayat Stok Opname</div>';
+  return `<div style="overflow-x:auto"><table><tr><th>Tanggal</th><th>Status</th><th>Petugas</th><th>Item</th><th>Sudah Dihitung</th><th>Ada Selisih</th><th></th></tr>
+    ${rows.map(s=>`<tr>
+      <td>${new Date(s.tanggal).toLocaleDateString('id-ID')}</td>
+      <td><span class="badge ${s.status==='Selesai'?'ok':(s.status==='Dibatalkan'?'danger':'warn')}">${s.status}</span></td>
+      <td>${s.petugas||"-"}</td>
+      <td>${s.totalItem}</td>
+      <td>${s.itemSudahDihitung} / ${s.totalItem}</td>
+      <td>${s.itemSelisih>0?`<span class="badge warn">${s.itemSelisih}</span>`:'0'}</td>
+      <td><button class="btn sm ghost" onclick="muatDetailOpname('${s.id}')">Lihat Detail</button></td>
+    </tr>`).join("")}
+  </table></div>`;
+}
+async function submitMulaiOpname(){
+  const r = await api('farmasi.opnameBuat', {petugas: state.user.nama}, 'POST');
+  if(r.ok){
+    toast(r.resumed ? (r.msg || 'Melanjutkan sesi Draft yang sudah ada') : 'Sesi Stok Opname baru dimulai — stok sistem saat ini sudah di-snapshot');
+    muatDetailOpname(r.opnameId);
+  } else toast(r.msg || 'Gagal memulai Stok Opname');
+}
+async function muatDetailOpname(opnameId){
+  const box = document.getElementById('opnameArea');
+  if(!box) return;
+  box.innerHTML = 'Memuat...';
+  const r = await api('farmasi.opnameDetail', {opnameId}, 'POST');
+  if(!r || !r.ok){ box.innerHTML = `<div class="empty">${(r&&r.msg)||'Gagal memuat sesi Stok Opname'}</div>`; return; }
+  window.__opnameDetailCache = r;
+  const o = r.opname;
+  const items = r.items || [];
+  const sudahDihitung = items.filter(i=>i.stokFisik!=null).length;
+  const adaSelisih = items.filter(i=>i.selisih!=null && i.selisih!==0).length;
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><b>Sesi Stok Opname — ${new Date(o.tanggal).toLocaleDateString('id-ID')}</b> ${o.petugas?`(${o.petugas})`:''}</div>
+        <span class="badge ${o.status==='Selesai'?'ok':(o.status==='Dibatalkan'?'danger':'warn')}">${o.status}</span>
+      </div>
+      <p class="hint" style="margin-top:6px">${sudahDihitung} / ${items.length} obat sudah dihitung — ${adaSelisih} di antaranya berbeda dari catatan sistem.</p>
+      ${o.status==='Dibatalkan' && o.alasanBatal ? `<div class="hint" style="margin-top:6px">Alasan pembatalan: ${o.alasanBatal}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        ${o.status==='Draft' ? `
+          <button class="btn sm" onclick="submitSelesaikanOpname('${o.id}')">✅ Selesaikan Stok Opname</button>
+          <button class="btn sm danger" onclick="submitBatalkanOpname('${o.id}')">❌ Batalkan Sesi</button>
+        ` : ''}
+        <button class="btn sm ghost" onclick="muatStokOpname()">← Kembali ke Riwayat</button>
+      </div>
+    </div>
+    ${kotakCariHtml('opnameItemList', 'Cari kode/nama obat...')}
+    <div id="opnameItemList" style="margin-top:10px"></div>`;
+  setListSearchState('opnameItemList', items, list2 => renderOpnameItemList(list2, o.status==='Draft'), ['kodeObat','namaObat']);
+}
+function renderOpnameItemList(items, bisaEdit){
+  if(!items || !items.length) return '<div class="empty">Tidak ada obat dalam sesi ini</div>';
+  return `<div style="overflow-x:auto"><table><tr><th>Kode</th><th>Nama Obat</th><th>Satuan</th><th>Stok Sistem (saat mulai)</th><th>Stok Fisik</th><th>Selisih</th><th>Catatan</th>${bisaEdit?'<th></th>':''}</tr>
+    ${items.map(i=>`<tr${i.selisih ? (i.selisih<0?' style="color:var(--red)"':' style="color:var(--amber)"') : ''}>
+      <td>${i.kodeObat}</td>
+      <td>${i.namaObat}</td>
+      <td>${i.satuan||"-"}</td>
+      <td>${i.stokSistem}</td>
+      <td>${bisaEdit ? `<input id="opnameFisik_${i.kodeObat}" type="number" value="${i.stokFisik ?? ''}" style="width:80px">` : (i.stokFisik ?? '<span class="hint">belum dihitung</span>')}</td>
+      <td>${i.selisih==null ? '-' : (i.selisih===0 ? '0' : (i.selisih>0?`+${i.selisih}`:i.selisih))}</td>
+      <td>${bisaEdit ? `<input id="opnameCatatan_${i.kodeObat}" value="${(i.catatan||'').replace(/"/g,'&quot;')}" placeholder="cth: rusak/kadaluarsa" style="min-width:120px">` : (i.catatan||'-')}</td>
+      ${bisaEdit ? `<td><button class="btn sm ghost" onclick="submitSimpanItemOpname('${i.kodeObat}')">Simpan</button></td>` : ''}
+    </tr>`).join("")}
+  </table></div>`;
+}
+async function submitSimpanItemOpname(kodeObat){
+  const opnameId = window.__opnameDetailCache && window.__opnameDetailCache.opname.id;
+  if(!opnameId) return;
+  const stokFisik = val('opnameFisik_'+kodeObat);
+  if(stokFisik === ''){ toast('Isi jumlah stok fisik dulu'); return; }
+  const r = await api('farmasi.opnameSimpanItem', {opnameId, kodeObat, stokFisik: Number(stokFisik), catatan: val('opnameCatatan_'+kodeObat)}, 'POST');
+  if(r.ok){ toast('Hasil hitung disimpan'); muatDetailOpname(opnameId); } else toast(r.msg || 'Gagal menyimpan');
+}
+async function submitSelesaikanOpname(opnameId){
+  const cache = window.__opnameDetailCache;
+  const belumDihitung = cache ? (cache.items||[]).filter(i=>i.stokFisik==null).length : 0;
+  let konfirmasi = 'Selesaikan sesi Stok Opname ini? Stok sistem akan disesuaikan mengikuti hasil hitung fisik untuk obat yang selisih.';
+  if(belumDihitung>0) konfirmasi = `Masih ada ${belumDihitung} obat yang BELUM dihitung — obat itu akan dilewati (stoknya TIDAK disesuaikan). ` + konfirmasi;
+  if(!confirm(konfirmasi)) return;
+  const r = await api('farmasi.opnameSelesaikan', {opnameId}, 'POST');
+  if(r.ok){ toast(r.msg || 'Stok Opname diselesaikan'); muatStokOpname(); } else toast(r.msg || 'Gagal menyelesaikan');
+}
+async function submitBatalkanOpname(opnameId){
+  const alasan = prompt('Alasan pembatalan sesi Stok Opname ini:');
+  if(alasan === null) return;
+  if(!alasan.trim()){ toast('Alasan pembatalan wajib diisi'); return; }
+  const r = await api('farmasi.opnameBatalkan', {opnameId, alasan: alasan.trim()}, 'POST');
+  if(r.ok){ toast('Sesi Stok Opname dibatalkan'); muatStokOpname(); } else toast(r.msg || 'Gagal membatalkan');
+}
+
 async function muatObatKadaluarsa(){
   const box = document.getElementById('obatKadaluarsaList');
   if(!box) return;
