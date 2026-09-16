@@ -276,6 +276,7 @@ const NAV = [
 {id:"ikp", label:"⚠️ Lapor Insiden (IKP)", step:null, group:"Mutu & Keselamatan"},
 {id:"keluhan", label:"💬 Keluhan & Kepuasan Pasien", step:null, group:"Mutu & Keselamatan"},
 {id:"dashboardmutu", label:"📊 Dashboard Mutu", step:null, group:"Mutu & Keselamatan"},
+{id:"konsistensialur", label:"🚦 Konsistensi Alur SIMRS", step:null, group:"Mutu & Keselamatan"},
 {id:"ppi", label:"🦠 Surveilans Infeksi (PPI)", step:null, group:"Mutu & Keselamatan"},
 {id:"alatmedis", label:"🛠️ Kalibrasi Alat Medis", step:null, group:"Mutu & Keselamatan"},
 {id:"laporanrl", label:"📊 Laporan RL", step:null, group:"Mutu & Keselamatan"},
@@ -1147,7 +1148,7 @@ function render(){
     dashboard: pageDashboard, pendaftaran: pagePendaftaran, kunjungan: pageKunjungan,igd:pageIGD,
     asesmenawal: pageAsesmenAwal, rekammedis: pageRekamMedis, cppt: pageCPPT, billing: pageBilling, inacbg: pageInaCbg,
     pulang: pagePulang, rekap: pageRekap, aturanba: pageAturanBA, penunjang: pagePenunjang, tarif: pageTarif,
-    ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, manajemenkamar: pageManajemenKamar,
+    ikp: pageIKP, keluhan: pageKeluhanPasien, dashboardmutu: pageDashboardMutu, konsistensialur: pageKonsistensiAlur, manajemenkamar: pageManajemenKamar,
     suratketerangan: pageSuratKeterangan, kamaroperasi: pageKamarOperasi, jadwaljaga: pageJadwalJaga,
     ppi: pagePpi, alatmedis: pageAlatMedis, laporanrl: pageLaporanRl, verifikasiklaim: pageVerifikasiKlaim,
     pengadaanobat: pagePengadaanObat, clinicalpathway: pageClinicalPathway,
@@ -1403,6 +1404,8 @@ async function pageDashboard(el){
     <div class="section-title" style="margin-top:18px">📅 Jadwal Jaga Hari Ini</div>
     <div id="jadwalJagaHariIniBody" class="empty">Memuat...</div>`;
   const r = await api("getDashboard", {}, "GET");
+  const alurRows = await api("konsistensiAlur.daftar", {}, "GET");
+  const jmlAlur = (alurRows||[]).length;
   document.getElementById("stats").innerHTML = `
     <div class="card stat"><b>${r.kunjunganHariIni??0}</b><span>Kunjungan Hari Ini</span></div>
     <div class="card stat"><b>${r.kunjunganAktif??0}</b><span>Kunjungan Aktif</span></div>
@@ -1411,6 +1414,7 @@ async function pageDashboard(el){
     <div class="card stat" style="border-color:var(--red)"><b style="color:var(--red)">${r.klaimBerpotensiRugi??0}</b><span>Klaim Berpotensi Rugi (billing &gt; prediksi CBG)</span></div>
     <div class="card stat"><b>${r.totalKlaimDiprediksi??0}</b><span>Total Klaim Diprediksi</span></div>
     <div class="card stat"><b>${r.tempatTidurTotal ? (r.tempatTidurKosong??0)+"/"+r.tempatTidurTotal : "-"}</b><span>Tempat Tidur Kosong${!r.tempatTidurTotal ? " (belum ada data tempat tidur)" : ""}</span></div>
+    <div class="card stat" style="${jmlAlur>0?'border-color:var(--red);cursor:pointer':'cursor:pointer'}" onclick="goTo('konsistensialur')"><b style="${jmlAlur>0?'color:var(--red)':''}">${jmlAlur}</b><span>🚦 Alur SIMRS Perlu Ditinjau (klik untuk lihat)</span></div>
   `;
   await muatReasesmenDashboard();
   await muatJadwalJagaHariIni();
@@ -5219,6 +5223,68 @@ async function simpanPengaturanReasesmen(kunci){
   const interval = Number(document.getElementById("ri_"+kunci).value);
   const r = await api("reasesmen.pengaturanSimpan", {kunci, intervalJam: interval}, "POST");
   toast(r.ok ? "Pengaturan disimpan" : (r.msg || "Gagal menyimpan"));
+}
+
+/* ================== Konsistensi Alur SIMRS ==================
+   Pemeriksaan otomatis untuk menemukan & menandai kunjungan/order yang
+   alurnya TIDAK SESUAI atau TERBALIK (mis. sudah diproses pulang tapi
+   belum lunas, ada tagihan tanpa diagnosa, kunjungan dibatalkan tapi
+   pembayarannya belum ikut dibatalkan) ATAU MACET/belum ditindaklanjuti
+   terlalu lama di suatu tahap (lab/rad/gizi/CSSD/linen/jenazah). Ini
+   PENANDAAN & NOTIFIKASI saja (tidak memblokir apa pun) -- staf tetap
+   perlu meninjau & menindaklanjuti manual, mengikuti kebijakan RS. */
+async function pageKonsistensiAlur(el){
+  el.innerHTML = `<h1>🚦 Konsistensi Alur SIMRS</h1>
+    <p class="sub">Pemeriksaan otomatis untuk menandai kunjungan/order yang alurnya tidak sesuai/terbalik (mis. sudah pulang tapi belum lunas), atau macet/belum ditindaklanjuti terlalu lama di suatu tahap. Ini murni penanda untuk ditinjau — tidak memblokir transaksi apa pun.</p>
+    <div class="grid cols3" id="alurStats"></div>
+    <div class="row" style="margin-top:14px;align-items:flex-end;gap:10px">
+      <div><label>Filter Kategori</label>
+        <select id="alurFilterKategori"><option value="">-- Semua Kategori --</option></select>
+      </div>
+      <div><button class="btn sm" onclick="muatKonsistensiAlur()">🔄 Periksa Ulang</button></div>
+    </div>
+    <div id="alurBody" style="margin-top:12px">Memuat...</div>`;
+  await muatKonsistensiAlur();
+}
+async function muatKonsistensiAlur(){
+  const box = document.getElementById("alurBody");
+  const statsBox = document.getElementById("alurStats");
+  box.innerHTML = "Memuat...";
+  const rows = await api("konsistensiAlur.daftar", {}, "GET");
+  window.__konsistensiAlurCache = rows || [];
+  const tinggi = window.__konsistensiAlurCache.filter(x=>x.tingkat==='Tinggi').length;
+  const sedang = window.__konsistensiAlurCache.filter(x=>x.tingkat==='Sedang').length;
+  statsBox.innerHTML = `
+    <div class="card stat" style="${tinggi>0?'border-color:var(--red)':''}"><b style="${tinggi>0?'color:var(--red)':''}">${tinggi}</b><span>Prioritas Tinggi</span></div>
+    <div class="card stat"><b>${sedang}</b><span>Prioritas Sedang</span></div>
+    <div class="card stat"><b>${window.__konsistensiAlurCache.length}</b><span>Total Perlu Ditinjau</span></div>`;
+  const kategoriUnik = [...new Set(window.__konsistensiAlurCache.map(x=>x.kategori))];
+  const selKategori = document.getElementById("alurFilterKategori");
+  if(selKategori){
+    const nilaiSebelum = selKategori.value;
+    selKategori.innerHTML = '<option value="">-- Semua Kategori --</option>' + kategoriUnik.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join("");
+    selKategori.value = nilaiSebelum;
+    selKategori.onchange = renderKonsistensiAlur;
+  }
+  renderKonsistensiAlur();
+}
+function renderKonsistensiAlur(){
+  const box = document.getElementById("alurBody");
+  if(!box) return;
+  const kategoriFilter = val('alurFilterKategori');
+  const rows = (window.__konsistensiAlurCache||[]).filter(x=> !kategoriFilter || x.kategori === kategoriFilter);
+  if(!rows.length){ box.innerHTML = '<div class="empty">✅ Tidak ada temuan konsistensi alur saat ini.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Prioritas</th><th>Kategori</th><th>No. Kunjungan</th><th>Pasien/Unit</th><th>Tahap Bermasalah</th><th>Detail</th><th>Sejak</th></tr>
+    ${rows.map(x=>`<tr>
+      <td><span class="badge ${x.tingkat==='Tinggi'?'danger':(x.tingkat==='Sedang'?'warn':'muted')}">${esc(x.tingkat||'-')}</span></td>
+      <td>${esc(x.kategori||'-')}</td>
+      <td>${esc(x.noKunjungan||'-')}</td>
+      <td>${esc(x.namaPasien||'-')}</td>
+      <td><b>${esc(x.tahapBolong||'-')}</b></td>
+      <td>${esc(x.detail||'-')}</td>
+      <td>${x.tanggal ? new Date(x.tanggal).toLocaleString('id-ID') : '-'}</td>
+    </tr>`).join("")}
+  </table>`;
 }
 
 /* ================== MASTER TARIF ================== */
