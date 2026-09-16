@@ -6887,11 +6887,12 @@ async function bukaDetailSp(id){
       <table><tr><th>Obat</th><th>Dipesan</th><th>Diterima</th><th>Harga Beli Perkiraan</th></tr>
         ${(r.items||[]).map(it=>`<tr><td>${esc(it.namaObat)}</td><td>${it.jumlahDipesan} ${it.satuan||''}</td><td>${it.jumlahDiterima}</td><td>Rp ${Number(it.hargaBeliPerkiraan||0).toLocaleString('id-ID')}</td></tr>`).join("")}
       </table>
-      ${bolehKelola ? `<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
-        ${h.status==='Draft' ? `<button class="btn sm" onclick="this.closest('.modal-backdrop').remove();bukaFormSpDariCache()">Ubah</button>` : ''}
-        ${h.status==='Draft' ? `<button class="btn sm" onclick="submitKirimSp('${id}')">Terbitkan/Kirim ke Supplier</button>` : ''}
-        ${['Draft','Dikirim','Diterima Sebagian'].includes(h.status) ? `<button class="btn sm danger" onclick="submitBatalkanSp('${id}')">Batalkan</button>` : ''}
-      </div>` : ''}
+      <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn sm ghost" onclick="cetakSuratPesanan()">🖨️ Cetak / Unduh Surat Pesanan</button>
+        ${bolehKelola && h.status==='Draft' ? `<button class="btn sm" onclick="this.closest('.modal-backdrop').remove();bukaFormSpDariCache()">Ubah</button>` : ''}
+        ${bolehKelola && h.status==='Draft' ? `<button class="btn sm" onclick="submitKirimSp('${id}')">Terbitkan/Kirim ke Supplier</button>` : ''}
+        ${bolehKelola && ['Draft','Dikirim','Diterima Sebagian'].includes(h.status) ? `<button class="btn sm danger" onclick="submitBatalkanSp('${id}')">Batalkan</button>` : ''}
+      </div>
       <div style="margin-top:16px;text-align:right"><button class="ghost" onclick="this.closest('.modal-backdrop').remove()">Tutup</button></div>
     </div>
   </div>`;
@@ -6906,6 +6907,85 @@ async function submitBatalkanSp(id){
   const r = await api('farmasi.spBatalkan', {id, alasan}, 'POST');
   toast(r.ok ? (r.msg||'SP dibatalkan') : (r.msg||'Gagal'));
   if(r.ok){ document.getElementById('spDetailPanel').innerHTML=''; await muatDaftarSp(); }
+}
+/* ---- Cetak/Unduh Surat Pesanan sebagai dokumen resmi untuk dikirim ke Supplier ---- */
+async function cetakSuratPesanan(){
+  const data = window.__spDetailCache;
+  if(!data || !data.ok){ toast('Data Surat Pesanan tidak ditemukan, buka ulang detailnya'); return; }
+  const h = data.header;
+  const items = data.items || [];
+  const profil = await api('rl.profilGet', {}, 'GET') || {};
+  const tanggal = new Date(h.tanggalPesan).toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'});
+  const totalKeseluruhan = items.reduce((s,it)=> s + (it.jumlahDipesan||0) * (it.hargaBeliPerkiraan||0), 0);
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Surat Pesanan ${esc(h.noSp)}</title>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #111; max-width: 800px; margin: 0 auto; padding: 16px; }
+  .kop { text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 18px; }
+  .kop .nama-rs { font-size: 18px; font-weight: bold; text-transform: uppercase; margin: 0; }
+  .kop .alamat-rs { font-size: 12px; margin: 2px 0 0; }
+  .judul { text-align: center; margin-bottom: 18px; }
+  .judul h2 { text-decoration: underline; margin: 0 0 4px; text-transform: uppercase; }
+  .judul .no-surat { margin: 0; }
+  .kepada { margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th, td { border: 1px solid #444; padding: 6px 8px; font-size: 12.5px; }
+  th { background: #eee; text-align: left; }
+  td.num, th.num { text-align: right; }
+  .ttd-wrap { display: flex; justify-content: flex-end; margin-top: 40px; }
+  .ttd { text-align: center; width: 260px; }
+  .ttd .spasi { height: 70px; }
+  .catatan { margin-bottom: 14px; white-space: pre-wrap; }
+  @media print { .no-print { display: none; } }
+</style></head>
+<body>
+  <div class="no-print" style="text-align:right;margin-bottom:10px">
+    <button onclick="window.print()" style="padding:8px 16px;font-size:14px">🖨️ Cetak / Simpan sebagai PDF</button>
+  </div>
+  <div class="kop">
+    <p class="nama-rs">${esc(profil.namaRs || 'RSU Allam Medica')}</p>
+    <p class="alamat-rs">${esc(profil.alamat || '')}</p>
+  </div>
+  <div class="judul">
+    <h2>Surat Pesanan</h2>
+    <p class="no-surat">Nomor: ${esc(h.noSp)}</p>
+  </div>
+  <div class="kepada">
+    <p>Tanggal: ${tanggal}</p>
+    <p>Kepada Yth.<br>
+    <b>${esc(h.namaSupplier || '-')}</b><br>
+    ${h.alamatSupplier ? esc(h.alamatSupplier).replace(/\n/g,'<br>') + '<br>' : ''}
+    ${h.kontakSupplier ? 'Telp/Kontak: ' + esc(h.kontakSupplier) : ''}
+    </p>
+  </div>
+  <p>Dengan hormat, bersama surat ini kami mengajukan pesanan barang farmasi dengan rincian sebagai berikut:</p>
+  <table>
+    <tr><th>No.</th><th>Nama Obat</th><th>Satuan</th><th class="num">Jumlah Dipesan</th><th class="num">Harga Perkiraan Satuan</th><th class="num">Subtotal Perkiraan</th></tr>
+    ${items.map((it,i)=>`<tr>
+      <td>${i+1}</td><td>${esc(it.namaObat)}</td><td>${esc(it.satuan||'-')}</td>
+      <td class="num">${it.jumlahDipesan}</td>
+      <td class="num">Rp ${Number(it.hargaBeliPerkiraan||0).toLocaleString('id-ID')}</td>
+      <td class="num">Rp ${Number((it.jumlahDipesan||0)*(it.hargaBeliPerkiraan||0)).toLocaleString('id-ID')}</td>
+    </tr>`).join("")}
+    <tr><td colspan="5" style="text-align:right"><b>Total Perkiraan</b></td><td class="num"><b>Rp ${Number(totalKeseluruhan).toLocaleString('id-ID')}</b></td></tr>
+  </table>
+  ${h.catatan ? `<div class="catatan"><b>Catatan:</b> ${esc(h.catatan)}</div>` : ''}
+  <p>Demikian Surat Pesanan ini kami buat untuk dapat diproses sebagaimana mestinya. Harga yang tercantum bersifat perkiraan dan dapat menyesuaikan harga resmi dari pihak Supplier. Atas perhatian dan kerja sama yang baik, kami ucapkan terima kasih.</p>
+  <div class="ttd-wrap">
+    <div class="ttd">
+      <p>Hormat kami,</p>
+      <div class="spasi"></div>
+      <p style="margin:0"><b>${esc(h.dibuatOleh || '.......................')}</b></p>
+      <p style="margin:0;border-top:1px solid #111;padding-top:2px">Instalasi Farmasi</p>
+    </div>
+  </div>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if(!w){ toast('Popup diblokir browser — izinkan popup untuk mencetak Surat Pesanan'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 /* ---- Penerimaan ---- */
