@@ -2089,7 +2089,7 @@ async function pageRekamMedis(el){
       <div><label>Saran Kode ICD-10 (Diagnosa Sekunder)</label><div id="saranICD10SekunderDariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
       <div><label>Saran Kode ICD-9-CM (Tindakan)</label><div id="saranICD9DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
     </div>
-    <p class="hint">💡 Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
+    <p class="hint">💡 Tulis klausa penyerta pakai kata "dengan"/"disertai"/"serta" atau pisahkan dengan koma (cth: "gastroenteritis akut, dengan dehidrasi ringan") supaya kotak Sekunder mencari dari klausa itu, bukan ikut-ikutan sama dengan kotak Utama. Kotak Sekunder & ICD-9 juga otomatis menambahkan saran dari <b>riwayat kunjungan lain</b> di RS ini dengan diagnosa utama yang sama (ditandai lencana "📊 riwayat"). Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
   </div>
   <div class="grid cols2">
     ${isRI ? `<div class="card">
@@ -2503,22 +2503,72 @@ async function kumpulkanSaranKode(kataKunci, searchFn){
   }
   return Object.values(skor).sort((a,b)=> b.cocok - a.cocok || a.kode.localeCompare(b.kode)).slice(0,10);
 }
+// Memecah kalimat diagnosa dokter jadi klausa Utama (bagian pertama) vs
+// klausa penyerta/sekunder (bagian sesudah kata penghubung yang lazim
+// dipakai dokter untuk menyebut diagnosa/keluhan penyerta), supaya kotak
+// saran "Diagnosa Utama" dan "Diagnosa Sekunder" tidak lagi menampilkan
+// daftar yang sama persis — masing-masing dicari dari klausanya sendiri.
+// Kalau tidak ditemukan kata penghubung sama sekali, seluruh kalimat
+// dianggap satu klausa utama saja (tidak ada klausa sekunder dari kalimat).
+const PEMISAH_KLAUSA_SEKUNDER = /\b(dengan|disertai|serta|beserta|dan riwayat|disertai dengan|disertai riwayat)\b|[,;]/gi;
+function pisahKlausaDiagnosa(teks){
+  const parts = teks.split(PEMISAH_KLAUSA_SEKUNDER).map(s=>(s||"").trim()).filter(Boolean);
+  // Setelah split dengan capturing group, kata penghubung yang tertangkap
+  // ikut jadi elemen array — buang elemen yang persis sama dengan salah
+  // satu kata penghubung itu sendiri supaya tidak dianggap klausa.
+  const kataPenghubung = new Set(["dengan","disertai","serta","beserta","dan riwayat","disertai dengan","disertai riwayat"]);
+  const klausa = parts.filter(p => !kataPenghubung.has(p.toLowerCase()));
+  if(klausa.length <= 1) return {utama: teks, sekunder: ""};
+  return {utama: klausa[0], sekunder: klausa.slice(1).join(", ")};
+}
 async function analisaKodeDariDiagnosa(){
   const teks = val("diagnosaMedisDokter");
   const box10 = document.getElementById("saranICD10DariDiagnosa");
   const box10Sekunder = document.getElementById("saranICD10SekunderDariDiagnosa");
   const box9 = document.getElementById("saranICD9DariDiagnosa");
   if(!teks || teks.length < 3){ toast("Ketik dulu kalimat diagnosa dokter (minimal 3 huruf) untuk dianalisa"); return; }
-  const kataKunci = ambilKataKunciDiagnosa(teks);
-  if(!kataKunci.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
-  toast("Menganalisa "+kataKunci.length+" kata kunci dari kalimat diagnosa...");
-  const [saran10, saran9] = await Promise.all([ kumpulkanSaranKode(kataKunci, searchICD10API), kumpulkanSaranKode(kataKunci, searchICD9API) ]);
+  const {utama: teksUtama, sekunder: teksSekunder} = pisahKlausaDiagnosa(teks);
+  const kataKunciUtama = ambilKataKunciDiagnosa(teksUtama);
+  const kataKunciSekunder = teksSekunder ? ambilKataKunciDiagnosa(teksSekunder) : [];
+  const kataKunciSemua = ambilKataKunciDiagnosa(teks);
+  if(!kataKunciUtama.length && !kataKunciSekunder.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
+  toast("Menganalisa kalimat diagnosa"+(teksSekunder ? " (dipecah jadi klausa utama & penyerta)" : "")+"...");
+  const [saran10Utama, saran10SekunderKlausa, saran9] = await Promise.all([
+    kumpulkanSaranKode(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua, searchICD10API),
+    kataKunciSekunder.length ? kumpulkanSaranKode(kataKunciSekunder, searchICD10API) : Promise.resolve([]),
+    kumpulkanSaranKode(kataKunciSemua, searchICD9API)
+  ]);
   const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} ${r.resmi ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
-  // Saran ICD-10 sama untuk kolom Utama & Sekunder (hasil analisa kata kunci
-  // yang sama) — bedanya cuma tujuan pengisian saat diklik.
-  box10.innerHTML = saran10.length ? saran10.map(baris("icd10")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
-  box10Sekunder.innerHTML = saran10.length ? saran10.map(baris("icd10sekunder")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
+  const barisRiwayat = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} <span class="badge" style="margin-left:4px;background:#e7f0ff;color:#0b4fa0;font-size:10px">📊 riwayat ${r.jumlah}x</span></div>`;
+
+  box10.innerHTML = saran10Utama.length ? saran10Utama.map(baris("icd10")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 yang cocok dengan kalimat ini</div>`;
   box9.innerHTML = saran9.length ? saran9.map(baris("icd9")).join("") : `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-9-CM yang cocok dengan kalimat ini</div>`;
+
+  // Kotak Sekunder: kalau ada klausa penyerta di kalimat, tampilkan hasil
+  // pencarian klausa itu dulu (paling relevan dengan yang ditulis dokter).
+  // Ditambah (bukan pengganti): saran dari RIWAYAT kunjungan lain di RS ini
+  // yang pernah punya kode Utama sama dengan kandidat teratas di atas —
+  // diagnosa sekunder apa yang paling sering menyertainya secara statistik.
+  let html10Sekunder = "";
+  if(saran10SekunderKlausa.length){
+    html10Sekunder += `<div class="hint" style="padding:4px 8px 0">Dari klausa "…${teksSekunder}"</div>` + saran10SekunderKlausa.map(baris("icd10sekunder")).join("");
+  }
+  const kodeAcuan = saran10Utama[0] && saran10Utama[0].kode;
+  if(kodeAcuan){
+    try{
+      const rekom = await api("rekomendasi.kodeTerkait", {kodeICD10: kodeAcuan}, "GET");
+      if(rekom && rekom.ok){
+        const diagLain = (rekom.diagnosaSekunder||[]).filter(x => !saran10SekunderKlausa.some(s=>s.kode===x.kode));
+        if(diagLain.length){
+          html10Sekunder += `<div class="hint" style="padding:4px 8px 0">📊 Riwayat kunjungan lain dengan diagnosa utama ${kodeAcuan}</div>` + diagLain.map(barisRiwayat("icd10sekunder")).join("");
+        }
+        if(rekom.tindakanIcd9 && rekom.tindakanIcd9.length){
+          box9.innerHTML += `<div class="hint" style="padding:4px 8px 0">📊 Tindakan ICD-9 yang sering menyertai diagnosa ${kodeAcuan} (riwayat RS ini)</div>` + rekom.tindakanIcd9.map(barisRiwayat("icd9")).join("");
+        }
+      }
+    }catch(e){ /* saran riwayat opsional — kalau gagal, saran kata kunci di atas tetap tampil normal */ }
+  }
+  box10Sekunder.innerHTML = html10Sekunder || `<div class="suggest-item" style="color:var(--muted)">Tidak ada saran kode ICD-10 sekunder yang cocok — tulis klausa penyerta (mis. "...dengan dehidrasi ringan") atau simpan diagnosa utama dulu supaya riwayat bisa dibandingkan</div>`;
   toast("Saran kode ditemukan — klik salah satu untuk mengisi otomatis (tetap cek ulang kecocokannya)");
 }
 function isiDariSaran(jenis, kode, desk){
