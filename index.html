@@ -1829,13 +1829,13 @@ const ICD9_DEMO_FALLBACK = [
   {Kode:"88.72", Deskripsi:"Diagnostic ultrasound of heart", Resmi:true},
   {Kode:"45.13", Deskripsi:"Other endoscopy of small intestine", Resmi:true},
 ];
-async function searchICD10API(q){
+async function searchICD10API(q, limit){
   if(DEMO_MODE){ q=q.toLowerCase(); return ICD10_DEMO_FALLBACK.filter(r=>r.Kode.toLowerCase().includes(q)||r.Deskripsi.toLowerCase().includes(q)); }
-  return await api("searchICD10", {q}, "GET");
+  return await api("searchICD10", limit ? {q, limit} : {q}, "GET");
 }
-async function searchICD9API(q){
+async function searchICD9API(q, limit){
   if(DEMO_MODE){ q=q.toLowerCase(); return ICD9_DEMO_FALLBACK.filter(r=>r.Kode.toLowerCase().includes(q)||r.Deskripsi.toLowerCase().includes(q)); }
-  return await api("searchICD9", {q}, "GET");
+  return await api("searchICD9", limit ? {q, limit} : {q}, "GET");
 }
 
 async function pageKunjungan(el){
@@ -2479,6 +2479,35 @@ const KAMUS_ISTILAH_MEDIS = {
   "hepatitis":["hepatitis"], "sirosis":["cirrhosis"], "gastritis":["gastritis"], "maag":["gastritis","dyspepsia"],
   "ispa":["respiratory infection","upper respiratory"], "isk":["urinary tract infection"]
 };
+// Kamus istilah -> TINDAKAN ICD-9-CM yang UMUM menyertai diagnosa tsb (bukan
+// kewajiban/aturan medis, hanya penunjuk pencarian supaya kotak saran ICD-9
+// tidak kosong untuk kasus yang jelas-jelas ada tindakan penunjang bakunya —
+// mis. "stroke" seharusnya mengarah ke CT-Scan kepala). Ini BUKAN daftar
+// lengkap/wajib — hanya menambah kata kunci pencarian ke fn_search_icd9,
+// jadi tetap lewat mekanisme pencarian & klik-konfirmasi yang sama seperti
+// biasa (dokter tetap yang memutuskan, bukan otomatis tersimpan). Hanya
+// diisi untuk kasus yang frasa Inggris-nya SUDAH dipastikan ada persis di
+// master ICD-9-CM resmi (dicek langsung ke database, bukan tebakan).
+const KAMUS_TINDAKAN_ICD9 = {
+  "stroke":["computerized axial tomography of head","magnetic resonance imaging of brain and brain stem","arteriography of cerebral arteries"],
+  "cerebrovascular":["computerized axial tomography of head","arteriography of cerebral arteries"],
+  "gagal jantung":["diagnostic ultrasound of heart","electrocardiogram"],
+  "jantung":["electrocardiogram"],
+  "nyeri dada":["electrocardiogram"],
+  "usus buntu":["appendectomy"], "apendisitis":["appendectomy"],
+  "gagal ginjal":["hemodialysis"],
+  "batu ginjal":["extracorporeal shockwave lithotripsy"],
+  "patah tulang":["closed reduction of fracture"], "patah":["closed reduction of fracture"],
+  "luka bakar":["debridement of wound"]
+};
+function ambilKataKunciTindakanICD9(teks){
+  const teksLower = teks.toLowerCase();
+  const hasil = [];
+  Object.keys(KAMUS_TINDAKAN_ICD9).forEach(frasa=>{
+    if(teksLower.includes(frasa)) hasil.push(...KAMUS_TINDAKAN_ICD9[frasa]);
+  });
+  return Array.from(new Set(hasil)).slice(0, 8);
+}
 function ambilKataKunciDiagnosa(teks){
   const teksLower = teks.toLowerCase();
   const kataDasar = teksLower.replace(/[^a-z0-9\s-]/g," ").split(/\s+/)
@@ -2491,17 +2520,36 @@ function ambilKataKunciDiagnosa(teks){
   // tidak terlalu banyak permintaan ke server
   return Array.from(new Set([...kataDasar, ...kataKamus])).slice(0, 10);
 }
-async function kumpulkanSaranKode(kataKunci, searchFn){
+// Catatan perbaikan akurasi (sebelumnya terbukti bisa salah arah — mis.
+// kasus "Gagal jantung kongestif (CHF)" pernah memunculkan kode Meningococcal
+// di atas kode CHF yang benar): dua penyebabnya sudah diperbaiki di sini —
+// (1) fn_search_icd10/9 SEBELUMNYA memotong setiap pencarian per-kata-kunci
+// jadi hanya 15 hasil teratas urut ABJAD kode — untuk kata kunci umum
+// (mis. "heart") bisa ada >15 kode yang cocok, sehingga kode yang benar-benar
+// relevan malah tidak pernah masuk hitungan sama sekali kalau kodenya
+// "kalah abjad" dari kode-kode lain yang cuma kebetulan mengandung kata yang
+// sama. Makanya di sini pencarian minta limit lebih besar (parameter
+// `limit`, dikirim ke backend) khusus untuk fitur analisa ini. (2) Skor
+// pencocokan SEBELUMNYA menghitung tiap kata kunci sama beratnya —
+// sekarang frasa (kata kunci berisi lebih dari 1 kata, jauh lebih spesifik,
+// mis. "heart failure") dihitung 3x lebih berat daripada kata tunggal yang
+// umum (mis. "heart" saja bisa cocok ke ratusan kode tidak terkait).
+async function kumpulkanSaranKode(kataKunci, searchFn, limit){
   const skor = {};
   for(const kw of kataKunci){
-    const hasil = await searchFn(kw);
+    const hasil = await searchFn(kw, limit || 15);
+    const bobot = kw.trim().includes(" ") ? 3 : 1;
     (hasil||[]).forEach(r=>{
       const kode = r.Kode||r.kode, desk = r.Deskripsi||r.deskripsi, resmi = !!(r.Resmi||r.resmi);
       if(!skor[kode]) skor[kode] = {kode, desk, resmi, cocok:0};
-      skor[kode].cocok++;
+      skor[kode].cocok += bobot;
     });
   }
-  return Object.values(skor).sort((a,b)=> b.cocok - a.cocok || a.kode.localeCompare(b.kode)).slice(0,10);
+  // Urutan: skor tertinggi dulu, lalu kode yang lebih pendek/umum (biasanya
+  // kategori induk, bukan sub-klasifikasi sangat spesifik), baru abjad —
+  // abjad HANYA dipakai sebagai penentu paling akhir kalau semuanya sama,
+  // bukan lagi penentu utama seperti sebelumnya.
+  return Object.values(skor).sort((a,b)=> b.cocok - a.cocok || a.kode.length - b.kode.length || a.kode.localeCompare(b.kode)).slice(0,10);
 }
 // Memecah kalimat diagnosa dokter jadi klausa Utama (bagian pertama) vs
 // klausa penyerta/sekunder (bagian sesudah kata penghubung yang lazim
@@ -2531,12 +2579,17 @@ async function analisaKodeDariDiagnosa(){
   const kataKunciUtama = ambilKataKunciDiagnosa(teksUtama);
   const kataKunciSekunder = teksSekunder ? ambilKataKunciDiagnosa(teksSekunder) : [];
   const kataKunciSemua = ambilKataKunciDiagnosa(teks);
+  const kataKunciTindakan = ambilKataKunciTindakanICD9(teks);
   if(!kataKunciUtama.length && !kataKunciSekunder.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
   toast("Menganalisa kalimat diagnosa"+(teksSekunder ? " (dipecah jadi klausa utama & penyerta)" : "")+"...");
+  // limit 120 (bukan default 15) khusus di sini -- supaya kata kunci umum
+  // (mis. "heart") tidak diam-diam membuang kode yang justru paling relevan
+  // hanya karena kalah urutan abjad kode (lihat catatan di kumpulkanSaranKode).
+  const LIMIT_ANALISA = 120;
   const [saran10Utama, saran10SekunderKlausa, saran9] = await Promise.all([
-    kumpulkanSaranKode(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua, searchICD10API),
-    kataKunciSekunder.length ? kumpulkanSaranKode(kataKunciSekunder, searchICD10API) : Promise.resolve([]),
-    kumpulkanSaranKode(kataKunciSemua, searchICD9API)
+    kumpulkanSaranKode(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua, searchICD10API, LIMIT_ANALISA),
+    kataKunciSekunder.length ? kumpulkanSaranKode(kataKunciSekunder, searchICD10API, LIMIT_ANALISA) : Promise.resolve([]),
+    kumpulkanSaranKode([...kataKunciSemua, ...kataKunciTindakan], searchICD9API, LIMIT_ANALISA)
   ]);
   const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} ${r.resmi ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
   const barisRiwayat = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} <span class="badge" style="margin-left:4px;background:#e7f0ff;color:#0b4fa0;font-size:10px">📊 riwayat ${r.jumlah}x</span></div>`;
