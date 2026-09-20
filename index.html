@@ -3144,9 +3144,33 @@ async function pageInaCbg(el){
   const strip = await patientStrip(state.activeKunjunganId);
   el.innerHTML = `<h1>Prediksi INA-CBG</h1><p class="sub">Langkah 5 — estimasi kode & tarif CBG berdasarkan diagnosa, tindakan, kelas rawat, dibandingkan dengan billing riil</p>${strip}`;
   if(!state.activeKunjunganId) return;
-  el.innerHTML += `<div class="card"><button class="btn" onclick="jalankanPrediksi()">🔮 Jalankan Prediksi INA-CBG</button></div><div id="hasilCbg" style="margin-top:14px"></div><div id="areaStatusKlaim" style="margin-top:14px"></div>`;
+  el.innerHTML += `<div class="card"><button class="btn" onclick="jalankanPrediksi()">🔮 Jalankan Prediksi INA-CBG</button></div><div id="peringatanCbgKedaluwarsa"></div><div id="hasilCbg" style="margin-top:14px"></div><div id="areaStatusKlaim" style="margin-top:14px"></div>`;
   const d = window.__detail;
-  if(d.klaim){ renderHasilCbg(d.klaim); renderStatusKlaim(d.klaim, d.riwayatStatusKlaim); }
+  if(d.klaim){
+    renderHasilCbg(d.klaim);
+    renderStatusKlaim(d.klaim, d.riwayatStatusKlaim);
+    renderPeringatanCbgKedaluwarsa(d);
+  }
+}
+// Perbaikan: perkiraan tarif INA-CBG sebelumnya bisa tampil "basi" kalau
+// diagnosa/tindakan sudah diubah SETELAH prediksi terakhir dijalankan, tanpa
+// ada tanda apa pun. d.klaimKedaluwarsa & d.diagnosaTindakanTerakhirDiubah
+// dihitung di backend (fn_get_kunjungan_detail) dari audit_log.
+function renderPeringatanCbgKedaluwarsa(d){
+  const box = document.getElementById("peringatanCbgKedaluwarsa");
+  if(!box) return;
+  if(d && d.klaimKedaluwarsa){
+    const waktuUbah = d.diagnosaTindakanTerakhirDiubah ? new Date(d.diagnosaTindakanTerakhirDiubah).toLocaleString('id-ID') : "-";
+    const waktuPrediksi = (d.klaim && d.klaim.TglPrediksi) ? new Date(d.klaim.TglPrediksi).toLocaleString('id-ID') : "-";
+    box.innerHTML = `<div class="flag-item danger" style="margin-top:10px">
+      ⚠️ <b>Prediksi CBG sudah kedaluwarsa.</b> Diagnosa/tindakan kunjungan ini diubah pada <b>${waktuUbah}</b> —
+      SETELAH prediksi terakhir dihitung pada <b>${waktuPrediksi}</b>. Kode &amp; tarif CBG di bawah ini kemungkinan
+      sudah TIDAK SESUAI lagi dengan diagnosa/tindakan terbaru. Klik "🔮 Jalankan Prediksi INA-CBG" di atas untuk
+      memperbarui sebelum diajukan/diverifikasi klaim.
+    </div>`;
+  } else {
+    box.innerHTML = "";
+  }
 }
 async function jalankanPrediksi(){
   const r = await api("prediksiINACBG", {kunjunganId:state.activeKunjunganId}, "POST");
@@ -3154,6 +3178,12 @@ async function jalankanPrediksi(){
     renderHasilCbg(r.data);
     const riw = await api("klaim.riwayatStatus", {kunjunganId:state.activeKunjunganId}, "GET");
     renderStatusKlaim(r.data, riw);
+    // Prediksi baru saja dihitung ulang (tanggal_prediksi = sekarang), jadi
+    // sudah pasti tidak kedaluwarsa lagi -- bersihkan banner & sinkronkan
+    // window.__detail supaya konsisten kalau halaman lain membacanya lagi.
+    const boxPeringatan = document.getElementById("peringatanCbgKedaluwarsa");
+    if(boxPeringatan) boxPeringatan.innerHTML = "";
+    if(window.__detail){ window.__detail.klaim = r.data; window.__detail.klaimKedaluwarsa = false; }
     toast("Prediksi selesai");
   }
 }
