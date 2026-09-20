@@ -2089,7 +2089,7 @@ async function pageRekamMedis(el){
       <div><label>Saran Kode ICD-10 (Diagnosa Sekunder)</label><div id="saranICD10SekunderDariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
       <div><label>Saran Kode ICD-9-CM (Tindakan)</label><div id="saranICD9DariDiagnosa" style="border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto"></div></div>
     </div>
-    <p class="hint">💡 Tulis klausa penyerta pakai kata "dengan"/"disertai"/"serta" atau pisahkan dengan koma (cth: "gastroenteritis akut, dengan dehidrasi ringan") supaya kotak Sekunder mencari dari klausa itu, bukan ikut-ikutan sama dengan kotak Utama. Kotak Sekunder & ICD-9 juga otomatis menambahkan saran dari <b>riwayat kunjungan lain</b> di RS ini dengan diagnosa utama yang sama (ditandai lencana "📊 riwayat"). Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
+    <p class="hint">💡 Tulis klausa penyerta pakai kata "dengan"/"disertai"/"serta" atau pisahkan dengan koma (cth: "gastroenteritis akut, dengan dehidrasi ringan") supaya kotak Sekunder mencari dari klausa itu, bukan ikut-ikutan sama dengan kotak Utama. Kotak Sekunder & ICD-9 juga otomatis menambahkan saran dari <b>riwayat kunjungan lain</b> di RS ini dengan diagnosa utama yang sama (ditandai lencana "📊 riwayat"). Sertakan juga riwayat/konteks relevan kalau ada (cth: "gatal-gatal, riwayat dari pondok pesantren") — sistem sudah bisa mengarahkan ke diagnosa yang lebih spesifik untuk beberapa kombinasi gejala+konteks yang umum (mis. Skabies). Klik salah satu saran untuk otomatis mengisi kotak "Kode (terpilih)" di kartu Tambah Diagnosa / Tambah Tindakan di bawah — tetap cek ulang kecocokannya sebelum disimpan.</p>
   </div>
   <div class="grid cols2">
     ${isRI ? `<div class="card">
@@ -2477,8 +2477,38 @@ const KAMUS_ISTILAH_MEDIS = {
   "kolesterol":["cholesterol"], "kegemukan":["obesity"], "obesitas":["obesity"],
   "gizi buruk":["malnutrition"], "kuning":["jaundice"], "sakit kuning":["jaundice"],
   "hepatitis":["hepatitis"], "sirosis":["cirrhosis"], "gastritis":["gastritis"], "maag":["gastritis","dyspepsia"],
-  "ispa":["respiratory infection","upper respiratory"], "isk":["urinary tract infection"]
+  "ispa":["respiratory infection","upper respiratory"], "isk":["urinary tract infection"],
+  "gatal":["pruritus","itching"], "kudis":["scabies"], "skabies":["scabies"]
 };
+// Kombinasi GEJALA + KONTEKS EPIDEMIOLOGI/RIWAYAT yang tidak bisa ditangkap
+// kamus istilah biasa di atas: satu gejala umum seperti "gatal" bisa berarti
+// banyak hal (alergi, jamur, pruritus biasa, dst) -- tapi kalau disebutkan
+// BERSAMA konteks penularan/lingkungan tertentu di kalimat yang sama,
+// kemungkinan diagnosisnya jadi jauh lebih terarah. Ini menjawab laporan
+// "tangan gatal-gatal, riwayat dari pondok pesantren" yang seharusnya
+// mengarah ke Skabies (B86) -- gatal saja tidak cukup spesifik, tapi
+// gatal + riwayat pesantren/asrama/kontak serumah adalah kombinasi klasik
+// untuk kecurigaan Skabies. Kata kunci tambahan dari kombinasi ini diberi
+// bobot lebih tinggi dari kata kunci biasa (lihat kumpulkanSaranKode) karena
+// sifatnya sudah terarah/spesifik, bukan sekadar kata umum yang kebetulan
+// cocok. BUKAN diagnosis otomatis -- tetap saran untuk dipilih & dicek ulang
+// dokter seperti saran kode lainnya. Daftar ini bisa ditambah kapan saja
+// kalau ada kombinasi gejala+konteks lain yang perlu diarahkan serupa.
+const KOMBINASI_GEJALA_KONTEKS = [
+  { gejala:["gatal","kudis","skabies"],
+    konteks:["pesantren","asrama","pondok","santri","napi","lapas","penjara","kontak serumah","sekamar","barak","panti"],
+    tambahan:["scabies"] }
+];
+function ambilKataKunciKombinasi(teks){
+  const teksLower = teks.toLowerCase();
+  const hasil = [];
+  KOMBINASI_GEJALA_KONTEKS.forEach(rule=>{
+    const adaGejala = rule.gejala.some(g=>teksLower.includes(g));
+    const adaKonteks = rule.konteks.some(k=>teksLower.includes(k));
+    if(adaGejala && adaKonteks) hasil.push(...rule.tambahan);
+  });
+  return Array.from(new Set(hasil));
+}
 // Kamus istilah -> TINDAKAN ICD-9-CM yang UMUM menyertai diagnosa tsb (bukan
 // kewajiban/aturan medis, hanya penunjuk pencarian supaya kotak saran ICD-9
 // tidak kosong untuk kasus yang jelas-jelas ada tindakan penunjang bakunya —
@@ -2534,11 +2564,17 @@ function ambilKataKunciDiagnosa(teks){
 // sekarang frasa (kata kunci berisi lebih dari 1 kata, jauh lebih spesifik,
 // mis. "heart failure") dihitung 3x lebih berat daripada kata tunggal yang
 // umum (mis. "heart" saja bisa cocok ke ratusan kode tidak terkait).
+// Elemen kataKunci boleh berupa string biasa (bobot dihitung otomatis dari
+// jumlah kata), atau objek {kw, bobot} untuk kata kunci hasil kombinasi
+// gejala+konteks (lihat ambilKataKunciKombinasi) yang sengaja diberi bobot
+// tetap lebih tinggi karena sudah terarah/spesifik, bukan kata umum.
 async function kumpulkanSaranKode(kataKunci, searchFn, limit){
   const skor = {};
-  for(const kw of kataKunci){
+  for(const item of kataKunci){
+    const kw = typeof item === "string" ? item : item.kw;
+    const bobotTetap = typeof item === "string" ? null : item.bobot;
     const hasil = await searchFn(kw, limit || 15);
-    const bobot = kw.trim().includes(" ") ? 3 : 1;
+    const bobot = bobotTetap != null ? bobotTetap : (kw.trim().includes(" ") ? 3 : 1);
     (hasil||[]).forEach(r=>{
       const kode = r.Kode||r.kode, desk = r.Deskripsi||r.deskripsi, resmi = !!(r.Resmi||r.resmi);
       if(!skor[kode]) skor[kode] = {kode, desk, resmi, cocok:0};
@@ -2580,14 +2616,22 @@ async function analisaKodeDariDiagnosa(){
   const kataKunciSekunder = teksSekunder ? ambilKataKunciDiagnosa(teksSekunder) : [];
   const kataKunciSemua = ambilKataKunciDiagnosa(teks);
   const kataKunciTindakan = ambilKataKunciTindakanICD9(teks);
-  if(!kataKunciUtama.length && !kataKunciSekunder.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
-  toast("Menganalisa kalimat diagnosa"+(teksSekunder ? " (dipecah jadi klausa utama & penyerta)" : "")+"...");
+  // Kombinasi gejala+konteks (mis. "gatal" + "pesantren" -> Skabies) dicek
+  // dari KALIMAT UTUH (bukan per-klausa) karena gejala & konteksnya sering
+  // ditulis dokter di klausa yang berbeda (mis. "gatal-gatal di tangan,
+  // riwayat dari pondok pesantren") -- lalu diberi bobot lebih tinggi
+  // (5, di atas frasa biasa yang bobotnya 3) supaya benar-benar menonjol
+  // sebagai saran teratas, bukan sekadar ikut nimbrung di tengah daftar.
+  const kataKunciKombinasi = ambilKataKunciKombinasi(teks).map(kw => ({kw, bobot: 5}));
+  if(!kataKunciUtama.length && !kataKunciSekunder.length && !kataKunciKombinasi.length){ toast("Kalimat terlalu umum — coba tulis istilah medis yang lebih spesifik"); box10.innerHTML=""; box10Sekunder.innerHTML=""; box9.innerHTML=""; return; }
+  toast("Menganalisa kalimat diagnosa"+(teksSekunder ? " (dipecah jadi klausa utama & penyerta)" : "")+(kataKunciKombinasi.length ? " — terdeteksi konteks riwayat/lingkungan khusus" : "")+"...");
   // limit 120 (bukan default 15) khusus di sini -- supaya kata kunci umum
   // (mis. "heart") tidak diam-diam membuang kode yang justru paling relevan
   // hanya karena kalah urutan abjad kode (lihat catatan di kumpulkanSaranKode).
   const LIMIT_ANALISA = 120;
+  const kataKunciUtamaFinal = [...(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua), ...kataKunciKombinasi];
   const [saran10Utama, saran10SekunderKlausa, saran9] = await Promise.all([
-    kumpulkanSaranKode(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua, searchICD10API, LIMIT_ANALISA),
+    kumpulkanSaranKode(kataKunciUtamaFinal, searchICD10API, LIMIT_ANALISA),
     kataKunciSekunder.length ? kumpulkanSaranKode(kataKunciSekunder, searchICD10API, LIMIT_ANALISA) : Promise.resolve([]),
     kumpulkanSaranKode([...kataKunciSemua, ...kataKunciTindakan], searchICD9API, LIMIT_ANALISA)
   ]);
