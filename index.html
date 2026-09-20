@@ -2290,7 +2290,12 @@ async function submitDiagnosa(){
   const r = editId
     ? await api("diagnosa.edit", {id: editId, jenis:val("jenisDiag"), kodeICD10:val("kodeICD10"), deskripsi:val("deskDiag")}, "POST")
     : await api("tambahDiagnosa", {kunjunganId:state.activeKunjunganId, KunjunganID:state.activeKunjunganId, jenis:val("jenisDiag"), JenisDiagnosa:val("jenisDiag"), kodeICD10:val("kodeICD10"), KodeICD10:val("kodeICD10"), deskripsi:val("deskDiag"), Deskripsi:val("deskDiag")}, "POST");
-  if(r.ok){ toast(editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"); batalEditDiagnosa(); await renderPertahankanAnalisaSaran(); } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
+  if(r.ok){
+    toast(!editId && r.diagnosaUtamaSebelumnyaDiturunkan
+      ? "Diagnosa utama ditambahkan — diagnosa utama sebelumnya otomatis dipindah jadi Sekunder (tidak dihapus)"
+      : (editId ? "Diagnosa diperbarui" : "Diagnosa ditambahkan"));
+    batalEditDiagnosa(); await renderPertahankanAnalisaSaran();
+  } else { toast(r.msg || (editId ? "Gagal memperbarui diagnosa" : "Gagal menambahkan diagnosa")); }
 }
 async function submitDiagnosaSekunder(){
   const kode = val("kodeICD10Sekunder"), desk = val("deskDiagSekunder");
