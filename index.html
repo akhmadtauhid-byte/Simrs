@@ -2497,7 +2497,36 @@ const KAMUS_ISTILAH_MEDIS = {
 const KOMBINASI_GEJALA_KONTEKS = [
   { gejala:["gatal","kudis","skabies"],
     konteks:["pesantren","asrama","pondok","santri","napi","lapas","penjara","kontak serumah","sekamar","barak","panti"],
-    tambahan:["scabies"] }
+    tambahan:["scabies"] },
+  // Demam + riwayat/kontak dengan daerah endemis malaria -> arahkan ke Malaria
+  { gejala:["demam"],
+    konteks:["daerah endemis malaria","endemis malaria","papua","nusa tenggara timur","kalimantan","riwayat bepergian ke daerah endemis","habis dari papua"],
+    tambahan:["unspecified malaria"] },
+  // Demam + konteks penularan DBD di sekitar pasien -> arahkan ke Dengue
+  // (melengkapi "demam berdarah"/"dbd" yang sudah ada di KAMUS_ISTILAH_MEDIS
+  // untuk kasus dokter menulis "demam" saja tanpa menyebut "berdarah").
+  { gejala:["demam"],
+    konteks:["gigitan nyamuk","tetangga dbd","wabah dbd","trombosit turun","nyamuk aedes","lingkungan banyak jentik","banyak yang demam berdarah"],
+    tambahan:["dengue"] },
+  // Batuk + kontak/riwayat TB -> arahkan ke Tuberkulosis Paru
+  { gejala:["batuk"],
+    konteks:["kontak tb","kontak dengan pasien tb","kontak serumah tb","serumah dengan tb","riwayat tb","riwayat pengobatan tb","putus obat tb","pengobatan tb tidak tuntas"],
+    tambahan:["tuberculosis of lung"] },
+  // Kejang + demam (anak) -> arahkan ke Kejang Demam (kode spesifik gabungan,
+  // bukan kode demam & kejang generik yang terpisah)
+  { gejala:["kejang"],
+    konteks:["demam"],
+    tambahan:["febrile convulsions"] },
+  // Luka tusuk/luka kotor + status imunisasi tetanus tidak jelas -> arahkan
+  // ke Tetanus (perlu evaluasi profilaksis, bukan berarti pasien sudah kena)
+  { gejala:["luka tusuk","tertusuk paku","tertusuk besi","tertusuk kawat","luka kotor"],
+    konteks:["belum vaksin tetanus","belum imunisasi tetanus","status vaksin tetanus tidak jelas","tidak pernah vaksin tetanus","riwayat vaksin tetanus tidak jelas","riwayat imunisasi tidak jelas"],
+    tambahan:["other tetanus"] },
+  // Gigitan/cakaran hewan berisiko rabies (anjing/kucing/kera/kelelawar) ->
+  // arahkan ke kode risiko paparan Rabies (bukan berarti sudah terkena)
+  { gejala:["gigitan","digigit","cakaran","dicakar"],
+    konteks:["anjing","kucing","kera","monyet","kelelawar"],
+    tambahan:["contact with and exposure to rabies"] }
 ];
 function ambilKataKunciKombinasi(teks){
   const teksLower = teks.toLowerCase();
@@ -2629,10 +2658,18 @@ async function analisaKodeDariDiagnosa(){
   // (mis. "heart") tidak diam-diam membuang kode yang justru paling relevan
   // hanya karena kalah urutan abjad kode (lihat catatan di kumpulkanSaranKode).
   const LIMIT_ANALISA = 120;
+  // Kata kunci kombinasi disertakan di pencarian Utama SELALU, dan juga di
+  // pencarian Sekunder kalau memang ada klausa penyerta -- soalnya kadang
+  // kode hasil kombinasi (mis. status imunisasi tetanus, risiko rabies)
+  // lebih pas sebagai diagnosa sekunder/penyerta dari luka yang jadi
+  // diagnosa utamanya, bukan selalu jadi diagnosa utama itu sendiri seperti
+  // Skabies/Malaria/TB. Biar dokter yang pilih dari kotak mana saja yang
+  // paling sesuai -- tidak ada salahnya muncul di kedua kotak.
   const kataKunciUtamaFinal = [...(kataKunciUtama.length ? kataKunciUtama : kataKunciSemua), ...kataKunciKombinasi];
+  const kataKunciSekunderFinal = kataKunciSekunder.length ? [...kataKunciSekunder, ...kataKunciKombinasi] : [];
   const [saran10Utama, saran10SekunderKlausa, saran9] = await Promise.all([
     kumpulkanSaranKode(kataKunciUtamaFinal, searchICD10API, LIMIT_ANALISA),
-    kataKunciSekunder.length ? kumpulkanSaranKode(kataKunciSekunder, searchICD10API, LIMIT_ANALISA) : Promise.resolve([]),
+    kataKunciSekunderFinal.length ? kumpulkanSaranKode(kataKunciSekunderFinal, searchICD10API, LIMIT_ANALISA) : Promise.resolve([]),
     kumpulkanSaranKode([...kataKunciSemua, ...kataKunciTindakan], searchICD9API, LIMIT_ANALISA)
   ]);
   const baris = (jenis) => (r) => `<div class="suggest-item" onclick='isiDariSaran(${JSON.stringify(jenis)}, ${JSON.stringify(r.kode)}, ${JSON.stringify((r.desk||"").replace(/'/g,"&#39;"))})'><b>${r.kode}</b> — ${r.desk} ${r.resmi ? '<span style="color:#0a7a3d;font-size:11px;font-weight:600">✅ Resmi BPJS</span>' : ''} <span class="hint">(cocok ${r.cocok} kata kunci)</span></div>`;
