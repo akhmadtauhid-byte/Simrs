@@ -1847,9 +1847,16 @@ async function pageKunjungan(el){
           <option value="">Semua Jenis</option><option>Rawat Jalan</option><option>Rawat Inap</option><option>IGD</option>
         </select></div>
       </div>
+      ${!DEMO_MODE ? `<button class="btn sm ghost" style="margin-top:10px" onclick="bukaLayarAntrian()">🖥️ Buka Layar Antrian (untuk TV Ruang Tunggu)</button>` : ""}
     </div>
     <div id="list"></div>`;
   await muatKunjunganAktif();
+}
+// Membuka halaman Layar Antrian publik (tanpa login, aman ditampilkan di TV
+// ruang tunggu -- tidak pernah menampilkan nama pasien/No. RM/data medis
+// apa pun) di tab/jendela baru, supaya bisa dipindah ke layar TV terpisah.
+function bukaLayarAntrian(){
+  window.open(location.pathname + '#layar-antrian', '_blank');
 }
 let _kjDebounce;
 function debounceMuatKunjungan(){
@@ -7856,7 +7863,145 @@ async function kirimUlangWa(id){
   if(r.ok){ toast('Pesan diantre ulang untuk dikirim'); await muatWaLog(); } else toast(r.msg || 'Gagal mengirim ulang');
 }
 
-render();
+/* ================== LAYAR ANTRIAN PUBLIK (TV Ruang Tunggu, TANPA LOGIN) ==================
+   Diakses lewat index.html#layar-antrian (tombol "🖥️ Buka Layar Antrian" di
+   halaman Kunjungan Aktif membukanya di tab/jendela baru). Di-bootstrap
+   SEBELUM render()/renderLogin() di paling bawah file ini, supaya bisa
+   dipasang di TV ruang tunggu tanpa perlu ada yang login di layar itu.
+
+   Data diambil LANGSUNG lewat supabase.rpc('fn_antrian_display', ...) --
+   BUKAN lewat api()/api_dispatch -- karena fn_antrian_display memang
+   satu-satunya fungsi yang sengaja diberi akses publik ("anon"), sementara
+   api_dispatch sendiri sengaja TIDAK PERNAH diberi akses itu (lihat catatan
+   keamanan di lengkapi_layar_antrian_publik.sql & lengkapi_farmasi_klaim_
+   antrian_jadwaljaga.sql). fn_antrian_display SENGAJA hanya mengembalikan
+   nomor antrian + poli tujuan + estimasi menit -- TIDAK PERNAH nama pasien/
+   No. RM/data medis apa pun, supaya aman ditampilkan ke ruang tunggu umum. */
+let __layarAntrianTerakhirDipanggil;
+async function bootLayarAntrianPublik(){
+  document.title = "Layar Antrian — RSU Allam Medica";
+  document.body.innerHTML = `
+    <style>
+      html,body{margin:0;height:100%}
+      body{background:#0b1b2b;color:#fff;font-family:'Segoe UI',Arial,sans-serif;overflow:hidden}
+      .la-wrap{display:flex;flex-direction:column;height:100vh;box-sizing:border-box;padding:24px 36px}
+      .la-header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1e3a5c;padding-bottom:16px}
+      .la-brand{font-size:28px;font-weight:700;letter-spacing:.5px}
+      .la-brand span{display:block;font-size:14px;font-weight:400;color:#8fb4d9;margin-top:2px}
+      .la-jam{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums}
+      .la-panggil{text-align:center;padding:28px 0;border-bottom:2px solid #1e3a5c;border-radius:8px}
+      .la-panggil-label{font-size:20px;color:#8fb4d9;letter-spacing:2px;text-transform:uppercase}
+      .la-panggil-nomor{font-size:120px;font-weight:800;line-height:1.1;color:#ffd166;text-shadow:0 0 30px rgba(255,209,102,.4)}
+      .la-panggil-tujuan{font-size:36px;font-weight:600;margin-top:4px}
+      .la-panggil-kosong{font-size:28px;color:#6a89a8;padding:40px 0}
+      .la-flash{animation:laFlash 1s ease-in-out 3}
+      @keyframes laFlash{0%,100%{background:transparent}50%{background:rgba(255,209,102,.15)}}
+      .la-grid{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:20px;overflow-y:auto}
+      .la-card{background:#122943;border-radius:14px;padding:18px 20px}
+      .la-card h3{margin:0 0 8px;font-size:20px;color:#fff}
+      .la-card .la-est{font-size:14px;color:#8fb4d9;margin-bottom:10px}
+      .la-nomor-list{display:flex;flex-wrap:wrap;gap:8px}
+      .la-nomor{background:#1e3a5c;border-radius:8px;padding:6px 12px;font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+      .la-nomor.dipanggil{background:#ffd166;color:#0b1b2b}
+      .la-kosong-poli{color:#4d6f92;font-size:14px}
+      .la-footer{text-align:center;color:#4d6f92;font-size:13px;padding-top:10px}
+    </style>
+    <div class="la-wrap">
+      <div class="la-header">
+        <div class="la-brand">RSU Allam Medica<span>Layar Informasi Antrian</span></div>
+        <div class="la-jam" id="laJam">--:--:--</div>
+      </div>
+      <div class="la-panggil" id="laPanggil"><div class="la-panggil-kosong">Memuat data antrian...</div></div>
+      <div class="la-grid" id="laGrid"></div>
+      <div class="la-footer">Nomor antrian diperbarui otomatis tiap beberapa detik — harap tetap berada di area tunggu sampai nomor Anda dipanggil.</div>
+    </div>`;
+  // Sebagian browser membatasi audio otomatis sebelum ada interaksi apa pun
+  // di halaman -- klik di mana saja pada layar TV (mis. lewat remote/sentuh
+  // sekali saat pertama dipasang) membantu "membuka" izin audio itu.
+  document.body.addEventListener('click', function(){ try{ speechSynthesis.resume(); }catch(e){} });
+  setInterval(laUpdateJam, 1000); laUpdateJam();
+  await laMuatAntrian();
+  setInterval(laMuatAntrian, 5000);
+}
+function laUpdateJam(){
+  const el = document.getElementById('laJam');
+  if(el) el.textContent = new Date().toLocaleTimeString('id-ID');
+}
+async function laMuatAntrian(){
+  let r;
+  try{
+    const { data, error } = await supabase.rpc('fn_antrian_display', {});
+    if(error) throw error;
+    r = data;
+  }catch(err){
+    return; // gagal ambil data sekali -- diamkan saja, dicoba lagi 5 detik berikutnya, jangan sampai layar "flicker" tiap ada gangguan jaringan sesaat
+  }
+  if(!r || !r.ok) return;
+
+  const panggilBox = document.getElementById('laPanggil');
+  const dipanggil = r.sedangDipanggil;
+  const kunciBaru = dipanggil ? (dipanggil.noAntrian + '|' + dipanggil.poliRuangan) : null;
+  const adaPanggilanBaru = !!kunciBaru && kunciBaru !== __layarAntrianTerakhirDipanggil;
+
+  if(dipanggil){
+    panggilBox.innerHTML = `
+      <div class="la-panggil-label">Sedang Dipanggil</div>
+      <div class="la-panggil-nomor">${esc(dipanggil.noAntrian || '-')}</div>
+      <div class="la-panggil-tujuan">${esc(dipanggil.poliRuangan || '-')}</div>`;
+  } else {
+    panggilBox.innerHTML = `<div class="la-panggil-kosong">Menunggu panggilan pertama hari ini...</div>`;
+  }
+
+  if(adaPanggilanBaru){
+    panggilBox.classList.remove('la-flash'); void panggilBox.offsetWidth; panggilBox.classList.add('la-flash');
+    laUmumkanSuara(dipanggil);
+  }
+  __layarAntrianTerakhirDipanggil = kunciBaru;
+
+  const estimasi = {};
+  (r.estimasiPerPoli||[]).forEach(function(e){ estimasi[e.poliRuangan] = e; });
+  const antrian = r.antrian || [];
+  const poliList = [...new Set(antrian.map(function(a){ return a.poliRuangan || '(Tanpa Poli)'; }))].sort();
+  const grid = document.getElementById('laGrid');
+  if(!poliList.length){
+    grid.innerHTML = `<div class="la-kosong-poli">Belum ada nomor antrian hari ini.</div>`;
+    return;
+  }
+  grid.innerHTML = poliList.map(function(poli){
+    const nomorPoli = antrian.filter(function(a){ return (a.poliRuangan||'(Tanpa Poli)') === poli; });
+    const est = estimasi[poli];
+    const estText = (est && est.jumlahMenunggu > 0)
+      ? (est.rataRataMenit ? `± ${est.jumlahMenunggu * est.rataRataMenit} menit lagi (${est.jumlahMenunggu} menunggu)` : `${est.jumlahMenunggu} menunggu — estimasi belum tersedia`)
+      : 'Tidak ada yang menunggu';
+    return `<div class="la-card">
+      <h3>${esc(poli)}</h3>
+      <div class="la-est">${estText}</div>
+      <div class="la-nomor-list">${nomorPoli.map(function(n){ return `<div class="la-nomor ${n.statusAntrian==='Dipanggil'?'dipanggil':''}">${esc(n.noAntrian||'-')}</div>`; }).join("")}</div>
+    </div>`;
+  }).join("");
+}
+// Pengumuman suara (Text-to-Speech browser, BUKAN pengganti panggilan lewat
+// pengeras suara RS yang sudah ada kalau memang sudah punya -- ini pelengkap
+// untuk RS yang belum punya sistem panggil suara terpisah). Kalau browser
+// TV tidak mendukung Web Speech API, dibiarkan diam tanpa error -- tampilan
+// visual (nomor besar + highlight kuning) tetap berfungsi seperti biasa.
+function laUmumkanSuara(dipanggil){
+  if(!dipanggil) return;
+  try{
+    if(typeof speechSynthesis === 'undefined') return;
+    const nomorDieja = String(dipanggil.noAntrian||'').split('').join(' ');
+    const teks = `Nomor antrian ${nomorDieja}, silakan menuju ${dipanggil.poliRuangan||'loket yang dituju'}.`;
+    const utter = new SpeechSynthesisUtterance(teks);
+    utter.lang = 'id-ID'; utter.rate = 0.9;
+    speechSynthesis.cancel(); speechSynthesis.speak(utter);
+  }catch(err){ /* audio hanya pelengkap -- jangan sampai mengganggu tampilan kalau browser tidak mendukung */ }
+}
+
+if(location.hash === '#layar-antrian' && !DEMO_MODE){
+  bootLayarAntrianPublik();
+} else {
+  render();
+}
 </script>
 </body>
 </html>
